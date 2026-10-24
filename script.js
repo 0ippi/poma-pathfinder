@@ -2,7 +2,7 @@
 const $ = (id) => document.getElementById(id);
 
 // --------------------
-// REAL MAP
+// MAP AND GPS
 // --------------------
 
 const mapStatus = $("map-status");
@@ -16,7 +16,7 @@ let gpsWatchId = null;
 function initializeMap() {
   if (typeof L === "undefined") {
     mapStatus.textContent =
-      "Map library unavailable. Check your internet connection.";
+      "Karttakirjastoa ei saatu ladattua. Tarkista internetyhteys.";
     return;
   }
 
@@ -25,11 +25,14 @@ function initializeMap() {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
   mapStatus.textContent =
-    "Map ready. Press Find my location to locate yourself.";
+    "Kartta valmis. Paina Find my location paikantaaksesi itsesi.";
+
+  // Varmistaa kartan oikean koon myös mobiiliselaimissa.
+  setTimeout(() => map.invalidateSize(), 100);
 }
 
 function showLocation(position) {
@@ -41,8 +44,7 @@ function showLocation(position) {
   $("gps-accuracy").textContent = `±${Math.round(accuracy)} m`;
 
   if (!map) {
-    mapStatus.textContent =
-      "Location received, but the map has not loaded.";
+    mapStatus.textContent = "Sijainti saatiin, mutta kartta ei ole käytettävissä.";
     return;
   }
 
@@ -55,7 +57,7 @@ function showLocation(position) {
       fillOpacity: 1
     }).addTo(map);
 
-    userMarker.bindPopup("Your reported location");
+    userMarker.bindPopup("Sijaintisi");
 
     accuracyCircle = L.circle(point, {
       radius: accuracy,
@@ -72,38 +74,36 @@ function showLocation(position) {
 
   map.setView(point, 16);
   mapStatus.textContent =
-    `Location updated. Reported accuracy: about ${Math.round(accuracy)} m.`;
+    `Sijainti päivitetty. Tarkkuus noin ${Math.round(accuracy)} m.`;
 
   connection.textContent = "● Location available";
 }
 
 function showLocationError(error) {
   const messages = {
-    1: "Location permission denied. Allow location access in Chrome.",
-    2: "Location unavailable. Check your phone's location settings.",
-    3: "Location request timed out. Try again."
+    1: "Sijaintilupa evättiin. Salli sijainnin käyttö selaimen asetuksista.",
+    2: "Sijaintia ei saatu. Tarkista puhelimen sijaintiasetukset.",
+    3: "Paikannus aikakatkaistiin. Yritä uudelleen."
   };
 
   mapStatus.textContent =
-    messages[error.code] || "Could not get your location.";
+    messages[error.code] || "Sijainnin hakeminen epäonnistui.";
 
   connection.textContent = "● Location unavailable";
 }
 
 function requestLocation() {
   if (!window.isSecureContext) {
-    mapStatus.textContent =
-      "Location requires HTTPS. Open the published GitHub Pages URL.";
+    mapStatus.textContent = "Paikannus vaatii HTTPS-yhteyden.";
     return;
   }
 
   if (!navigator.geolocation) {
-    mapStatus.textContent =
-      "This browser does not support location access.";
+    mapStatus.textContent = "Selain ei tue paikannusta.";
     return;
   }
 
-  mapStatus.textContent = "Requesting location...";
+  mapStatus.textContent = "Haetaan sijaintia...";
 
   navigator.geolocation.getCurrentPosition(
     showLocation,
@@ -120,14 +120,13 @@ $("enable-gps").addEventListener("click", requestLocation);
 
 $("follow-gps").addEventListener("click", () => {
   if (!window.isSecureContext || !navigator.geolocation) {
-    mapStatus.textContent =
-      "Live location requires HTTPS and browser location support.";
+    mapStatus.textContent = "Jatkuva paikannus vaatii HTTPS-yhteyden.";
     return;
   }
 
   if (gpsWatchId !== null) return;
 
-  mapStatus.textContent = "Starting live location tracking...";
+  mapStatus.textContent = "Käynnistetään jatkuvaa paikannusta...";
 
   gpsWatchId = navigator.geolocation.watchPosition(
     showLocation,
@@ -149,63 +148,79 @@ $("stop-gps").addEventListener("click", () => {
   }
 
   $("follow-gps").disabled = false;
-  mapStatus.textContent = "Live tracking stopped.";
+  mapStatus.textContent = "Jatkuva paikannus pysäytetty.";
 });
 
 // --------------------
-// PHONE SENSORS
+// PHONE SENSORS AND COMPASS
 // --------------------
 
 let sensorsStarted = false;
+
+function getCompassHeading(event) {
+  // iOS Safari voi tarjota suoraan kompassisuunnan.
+  if (typeof event.webkitCompassHeading === "number") {
+    return event.webkitCompassHeading;
+  }
+
+  // Muissa selaimissa alpha on laiteasennon kulma,
+  // eikä se kaikissa laitteissa vastaa kompassisuuntaa.
+  if (typeof event.alpha === "number") {
+    return (360 - event.alpha) % 360;
+  }
+
+  return null;
+}
+
+function updateCompass(event) {
+  const heading = getCompassHeading(event);
+  if (heading === null) return;
+
+  const degrees = Math.round(heading);
+  const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const direction = directions[Math.round(degrees / 45) % 8];
+
+  $("real-heading").textContent = `${direction} · ${degrees}°`;
+  $("compass-arrow").style.transform = `rotate(${degrees}deg)`;
+  $("compass-label").textContent = direction;
+}
 
 $("enable-sensors").addEventListener("click", async () => {
   const status = $("sensor-status");
   const button = $("enable-sensors");
 
   if (sensorsStarted) {
-    status.textContent = "Sensor listeners are already active.";
+    status.textContent = "Sensorit ovat jo käytössä.";
     return;
   }
 
   button.disabled = true;
-  status.textContent = "Requesting sensor access...";
+  status.textContent = "Pyydetään sensorien käyttöoikeutta...";
 
   try {
     if (!window.isSecureContext) {
-      throw new Error("Sensors require an HTTPS page.");
+      throw new Error("Sensorit vaativat HTTPS-yhteyden.");
     }
 
     if (typeof DeviceOrientationEvent === "undefined") {
-      throw new Error("Orientation sensor is unavailable.");
+      throw new Error("Selain ei tue suunta-anturia.");
     }
 
-    if (
-      typeof DeviceOrientationEvent.requestPermission === "function"
-    ) {
-      const permission =
-        await DeviceOrientationEvent.requestPermission();
+    // iOS Safari vaatii käyttäjän luvan.
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      const permission = await DeviceOrientationEvent.requestPermission();
 
       if (permission !== "granted") {
-        throw new Error("Orientation permission was denied.");
+        throw new Error("Suunta-anturin käyttöoikeus evättiin.");
       }
     }
 
-    let orientationSeen = false;
-    let motionSeen = false;
-
-    window.addEventListener("deviceorientation", (event) => {
-      if (event.alpha !== null) {
-        orientationSeen = true;
-        $("real-heading").textContent =
-          `${Math.round(event.alpha)}° (raw orientation)`;
-      }
-    });
+    window.addEventListener("deviceorientation", updateCompass);
 
     window.addEventListener("devicemotion", (event) => {
       const a = event.accelerationIncludingGravity;
 
       if (a && a.x !== null && a.y !== null && a.z !== null) {
-        motionSeen = true;
         $("real-motion").textContent =
           `X ${a.x.toFixed(1)} · Y ${a.y.toFixed(1)} · Z ${a.z.toFixed(1)}`;
       }
@@ -213,10 +228,10 @@ $("enable-sensors").addEventListener("click", async () => {
 
     sensorsStarted = true;
     status.textContent =
-      "Sensor listeners started. Move and rotate your phone to test.";
+      "Sensorit käynnistetty. Käännä puhelinta ja tarkkaile kompassia.";
   } catch (error) {
     status.textContent =
-      error.message || "Could not access phone sensors.";
+      error.message || "Sensorien käyttö epäonnistui.";
   } finally {
     button.disabled = false;
   }
@@ -227,8 +242,6 @@ $("enable-sensors").addEventListener("click", async () => {
 // --------------------
 
 let demoDistance = 0;
-let demoX = 50;
-let demoY = 50;
 let demoHeading = 0;
 
 function compassLabel(degrees) {
@@ -244,44 +257,21 @@ function updateDemo() {
     `${compassLabel(demoHeading)} · ${demoHeading}°`;
 }
 
-$("start").addEventListener("click", () => {
+function resetDemo() {
   demoDistance = 0;
-  demoX = 50;
-  demoY = 50;
   demoHeading = 0;
   updateDemo();
-});
+}
+
+$("start").addEventListener("click", resetDemo);
 
 $("move").addEventListener("click", () => {
   demoDistance += 10;
   demoHeading = (demoHeading + 45) % 360;
-
-  demoX = Math.max(
-    10,
-    Math.min(
-      90,
-      demoX + Math.cos(demoHeading * Math.PI / 180) * 5
-    )
-  );
-
-  demoY = Math.max(
-    10,
-    Math.min(
-      90,
-      demoY + Math.sin(demoHeading * Math.PI / 180) * 5
-    )
-  );
-
   updateDemo();
 });
 
-$("reset").addEventListener("click", () => {
-  demoDistance = 0;
-  demoX = 50;
-  demoY = 50;
-  demoHeading = 0;
-  updateDemo();
-});
+$("reset").addEventListener("click", resetDemo);
 
 // --------------------
 // SIMPLE OFFLINE ASSISTANT
@@ -304,19 +294,19 @@ chatForm.addEventListener("submit", (event) => {
 
   if (q.includes("gps") || q.includes("location")) {
     answer =
-      "Poma can display the location supplied by your phone. Accuracy depends on available signals.";
+      "Poma näyttää puhelimen ilmoittaman sijainnin. Tarkkuus riippuu saatavilla olevista signaaleista.";
   } else if (q.includes("wifi")) {
     answer =
-      "Android may use Wi-Fi for location, but this webpage cannot directly scan nearby Wi-Fi networks.";
-  } else if (q.includes("compass") || q.includes("heading")) {
+      "Android voi käyttää Wi-Fi-verkkoja paikannuksen apuna, mutta verkkosivu ei voi suoraan skannata lähellä olevia Wi-Fi-verkkoja.";
+  } else if (q.includes("compass") || q.includes("heading") || q.includes("suunta")) {
     answer =
-      "The orientation sensor gives a raw reading. It is not always a calibrated compass heading.";
+      "Kompassi käyttää puhelimen suunta-anturia. Lukema voi olla epätarkka tai kalibroimaton.";
   } else if (q.includes("offline")) {
     answer =
-      "The app interface can work offline once loaded, but map tiles and location services may need connectivity.";
+      "Sovellus voi toimia osittain ilman yhteyttä, mutta karttalaatat tarvitsevat internetin, ellei niitä tallenneta erikseen.";
   } else {
     answer =
-      "I'm the Poma demo assistant. I use simple built-in replies and am not connected to a real AI.";
+      "Olen Poman esittelyavustaja. Käytän valmiita vastauksia enkä ole yhteydessä oikeaan tekoälyyn.";
   }
 
   addMessage(`Poma: ${answer}`);
