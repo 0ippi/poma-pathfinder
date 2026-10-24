@@ -6,63 +6,76 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0b1220">
   <title>Poma Pathfinder</title>
+
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          defer></script>
+  <script src="script.js" defer></script>
 </head>
 
 <body>
   <header>
     <h1>◈ Poma <span>Pathfinder</span></h1>
-    <p id="connection">● Offline mode · Demo</p>
+    <p id="connection">● GPS not connected</p>
   </header>
 
   <main>
-    <section class="map-panel">
-      <h2>Navigation</h2>
+    <section class="panel">
+      <h2>Live Navigation</h2>
+      <p class="muted">Your phone's reported location</p>
 
-      <h3>GPS Location</h3>
+      <div id="map"></div>
+      <p id="map-status" role="status">
+        Kartta latautuu. Paina paikannuspainiketta.
+      </p>
+
+      <button id="enable-gps">Find my location</button>
+      <button id="follow-gps" class="secondary">Start live tracking</button>
+      <button id="stop-gps" class="secondary">Stop tracking</button>
+
       <div class="stats">
         <div>
-          <small>GPS POSITION</small>
-          <p id="gps-position">Not requested</p>
+          <small>LATITUDE</small>
+          <p id="gps-lat">—</p>
         </div>
         <div>
-          <small>GPS ACCURACY</small>
+          <small>LONGITUDE</small>
+          <p id="gps-lon">—</p>
+        </div>
+        <div>
+          <small>ACCURACY</small>
           <p id="gps-accuracy">—</p>
         </div>
       </div>
 
-      <button id="enable-gps">Get GPS location</button>
-      <p id="gps-status">Location not requested.</p>
-
-      <h3>Phone Sensors</h3>
+      <h2>Phone Sensors</h2>
       <div class="stats">
         <div>
-          <small>COMPASS</small>
-          <p id="real-heading">Waiting for sensor</p>
+          <small>ORIENTATION</small>
+          <p id="real-heading">Not enabled</p>
         </div>
         <div>
           <small>MOTION</small>
-          <p id="real-motion">Waiting for sensor</p>
+          <p id="real-motion">Not enabled</p>
         </div>
       </div>
 
       <button id="enable-sensors">Enable phone sensors</button>
-      <p id="sensor-status">Sensors not enabled.</p>
+      <p id="sensor-status" role="status">Sensors not enabled.</p>
+    </section>
 
-      <h3>Demo Navigation</h3>
-      <div id="map">
-        <div class="road road-one"></div>
-        <div class="road road-two"></div>
-        <div class="road road-three"></div>
-        <div id="marker">●</div>
-        <div id="uncertainty"></div>
-        <span class="map-label">DEMO MAP</span>
-      </div>
+    <section class="panel">
+      <h2>Demo Navigation</h2>
+      <p class="muted">
+        Simulated movement only — not your real GPS track.
+      </p>
 
       <div class="stats">
         <div>
-          <small>ESTIMATED POSITION</small>
-          <p id="position">Not established</p>
+          <small>DEMO POSITION</small>
+          <p id="position">Not started</p>
         </div>
         <div>
           <small>DISTANCE</small>
@@ -76,17 +89,17 @@
 
       <button id="start">Start demo</button>
       <button id="move">Simulate movement</button>
-      <button id="reset">Reset</button>
+      <button id="reset" class="secondary">Reset demo</button>
     </section>
 
-    <section class="assistant">
+    <section class="panel assistant">
       <h2>Poma Assistant</h2>
-      <p class="muted">Offline navigation assistant · Demo</p>
+      <p class="muted">Offline rule-based demo assistant</p>
 
-      <div id="messages">
+      <div id="messages" aria-live="polite">
         <p class="message">
-          Hello! I can help you understand navigation without GPS.
-          This is a demo, not a real AI.
+          Hello! I'm Poma. I can explain GPS, sensors and offline navigation.
+          This demo is not a real AI.
         </p>
       </div>
 
@@ -95,6 +108,7 @@
           id="question"
           placeholder="Ask Poma..."
           autocomplete="off"
+          aria-label="Ask Poma"
         >
         <button type="submit">Send</button>
       </form>
@@ -102,10 +116,10 @@
   </main>
 
   <footer>
-    GPS and sensor readings depend on device permissions and availability.
-    Demo map is simulated. No emergency connection.
+    GPS and sensor readings depend on device support and permissions.
+    Map tiles require internet. No emergency connection.
+    <br>
+    Map data © OpenStreetMap contributors.
   </footer>
-
-  <script src="script.js"></script>
 </body>
 </html>
