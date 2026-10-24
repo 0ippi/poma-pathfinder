@@ -1,0 +1,6 @@
+{
+  "appId": "fi.poma.pathfinder",
+  "appName": "Poma Pathfinder",
+  "webDir": "www",
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
