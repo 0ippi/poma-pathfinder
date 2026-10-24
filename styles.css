@@ -235,3 +235,11 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .pulse { animation:pulse .25s ease-out; }
 @keyframes pulse { from { color:var(--accent); } to { color:var(--text); } }
 @media (prefers-reduced-motion:reduce) { .pulse { animation:none; } }
+
+/* v7 additions */
+.banner { padding:12px 14px; margin:12px 0 0; background:var(--card2); border-left:4px solid var(--accent); border-radius:8px; font-size:.92rem; }
+.big { width:100%; min-height:54px; font-size:1.05rem; margin:12px 0 0; }
+.stop { background:#5a2b33; border-color:#a4505c; color:#fff; }
+details { margin-top:14px; border-top:1px solid var(--border); padding-top:10px; }
+summary { cursor:pointer; font-weight:bold; padding:6px 0; }
+.full { grid-column:1 / -1; }
