@@ -20,7 +20,8 @@
     stepScale: clamp(Number(store.get("poma.scale")) || 1, 0.7, 1.4),
     steps: 0, distance: 0, lastStepAt: 0, gravity: 9.81, smooth: 0, prevSmooth: 0,
     orientationHandler: null, orientationEvent: null, motionHandler: null, motionDetected: false,
-    wakeLock: null, gpsWatch: null, gpsState: "Off", lastGpsAt: 0, calib: null
+    wakeLock: null, gpsWatch: null, gpsState: "Off", lastGpsAt: 0, calib: null,
+    lastWirelessAt: 0, wlTimer: null, wlText: "Off", lastScan: null
   };
 
   const log = msg => {
@@ -35,18 +36,22 @@
     return (Number.isFinite(h) && h >= 100 && h <= 230 ? h : 175) / 100 * 0.415 * state.stepScale;
   };
   const gpsFresh = () => state.tracking && Date.now() - state.lastGpsAt < GPS_FRESH_MS;
+  const wirelessFresh = () => state.tracking && Date.now() - state.lastWirelessAt < 90000;
+  const W = () => window.PomaWireless;
   const useGps = () => $("source-mode").value === "auto";
 
   function hint() {
     if (!state.tracking) return "Press Start tracking.";
     if (!state.origin) {
       return useGps() && state.gpsState !== "Denied" && state.gpsState !== "Unavailable"
-        ? "Looking for GPS… or tap the map where you are."
-        : "No start point. Tap the map where you are, then walk.";
+        ? "Looking for GPS, Wi-Fi or Bluetooth… or tap the map where you are."
+        : W() && W().available() ? "Scanning Wi-Fi and Bluetooth… or tap the map where you are."
+        : "No start point. Wi-Fi/Bluetooth need the Android app. Tap the map where you are, then walk.";
     }
     if (state.heading === null) return "Waiting for compass. Move the phone in a figure-8 to calibrate.";
     if ($("carry-mode").value === "pocket") return "Pocket mode: steps are counted, position is not moved.";
     if (gpsFresh()) return "GPS fix in use. Steps fill in when GPS drops out.";
+    if (wirelessFresh()) return "Position from nearby Wi-Fi/Bluetooth. Steps fill in between scans.";
     if (!state.headingAbsolute) return "Compass is relative here, so direction may be off. Use a GPS fix or the manual heading slider.";
     return `Tracking with steps and compass. Error grows about 5 % of distance walked.`;
   }
@@ -54,7 +59,7 @@
   function updateStats() {
     const hasH = state.heading !== null;
     const src = !state.origin ? (state.tracking ? "Waiting for start" : "Not started")
-      : gpsFresh() ? "GPS + steps" : "Steps + compass";
+      : gpsFresh() ? "GPS + steps" : wirelessFresh() ? "Wi-Fi/BT + steps" : "Steps + compass";
     setText("position-status", src);
     setText("accuracy-value", state.origin ? `~${Math.round(state.sigma)} m` : "Unknown");
     setText("heading-value", hasH ? `${Math.round((state.heading + headingOffset() + 360) % 360)}°` : "Unknown");
@@ -62,6 +67,7 @@
     setText("distance-value", `${state.distance.toFixed(1)} m`);
     setText("pos-value", state.pos ? `${state.pos.lat.toFixed(5)}, ${state.pos.lon.toFixed(5)}` : "–");
     setText("gps-status", state.gpsState);
+    setText("wireless-status", W() && W().available() ? state.wlText : "Needs Android app");
     setText("compass-status", !state.orientationHandler ? "Inactive" : !hasH ? "Waiting" :
       state.headingAbsolute ? "Active (absolute)" : "Active (relative)");
     setText("motion-status", state.motionHandler ? (state.motionDetected ? "Receiving events" : "Waiting") : "Inactive");
@@ -230,14 +236,66 @@
         state.autoOffset = wrap180(state.autoOffset + 0.15 * err);
       }
     }
-    // fuse: weight by variance
+    fuse(lat, lon, acc, "gps");
+    updateStats();
+  }
+  /* Combine any absolute fix (GPS, Wi-Fi, BLE) with the current estimate, weighted by variance */
+  function fuse(lat, lon, acc, src) {
     const s2 = state.sigma ** 2, a2 = acc ** 2, K = s2 / (s2 + a2);
     state.pos.lat += K * (lat - state.pos.lat);
     state.pos.lon += K * (lon - state.pos.lon);
-    state.sigma = Math.sqrt(1 / (1 / s2 + 1 / a2));
-    state.track.push({ t: Date.now(), lat: state.pos.lat, lon: state.pos.lon, step: state.steps, src: "gps" });
-    drawPosition(); updateStats();
+    state.sigma = Math.max(3, Math.sqrt(1 / (1 / s2 + 1 / a2)));
+    state.track.push({ t: Date.now(), lat: state.pos.lat, lon: state.pos.lon, step: state.steps, src });
+    drawPosition();
   }
+
+  /* ---------- Wi-Fi + Bluetooth (native Android app only) ---------- */
+  async function wirelessStep() {
+    if (!state.tracking) return;
+    try {
+      const sc = await W().scan();
+      state.lastScan = sc;
+      let t = `${sc.wifi.length} Wi-Fi, ${sc.ble.length} BLE${sc.throttled ? " (throttled)" : ""}`;
+      if (sc.errors.length) t += ` · ${sc.errors.join(", ")}`;
+      const fix = await W().locate(sc);
+      if (fix) {
+        state.lastWirelessAt = Date.now();
+        t += ` · ${fix.src} ±${Math.round(fix.acc)} m`;
+        if (!state.origin) setOriginAt(fix.lat, fix.lon, fix.acc, fix.src);
+        else fuse(fix.lat, fix.lon, fix.acc, fix.src);
+      } else t += " · no position match";
+      state.wlText = t;
+    } catch (e) { state.wlText = "Scan failed: " + (e && e.message || e); }
+    updateStats();
+    if (state.tracking) state.wlTimer = setTimeout(wirelessStep, 30000);
+  }
+  async function startWireless() {
+    try {
+      const st = await W().prepare();
+      if (!st.wifiPermission && !st.blePermission) { state.wlText = "Permission denied"; return; }
+      if (!st.locationServicesOn) log("Android location switch is off: Wi-Fi/BLE scans will return nothing. GPS is not needed, but this switch is.");
+      if (!st.wifiEnabled) log("Wi-Fi is off");
+      if (!st.bluetoothEnabled) log("Bluetooth is off");
+      state.wlText = "Scanning…";
+      wirelessStep();
+    } catch (e) { state.wlText = "Unavailable: " + (e && e.message || e); }
+  }
+  function stopWireless() { clearTimeout(state.wlTimer); state.wlTimer = null; state.wlText = "Off"; }
+
+  async function learnHere() {
+    if (!W() || !W().available()) { setText("assistant-message", "Learning places needs the Android app."); return; }
+    if (!state.pos || state.sigma > 10) { setText("assistant-message", "Tap the map exactly where you stand first (position error must be under 10 m)."); return; }
+    const sc = await W().scan();
+    setText("assistant-message", W().learn(state.pos.lat, state.pos.lon, sc)
+      ? `Saved fingerprint (${W().counts().fingerprints} total).` : "Too few Wi-Fi/BLE signals here to save.");
+  }
+  function exportDb() {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(W().exportDb(), null, 2)], { type: "application/json" }));
+    a.download = "poma-wireless-db.json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   function onGpsError(err) {
     if (err.code === 1) { state.gpsState = "Denied"; stopGps(false); log("GPS permission denied; continuing without GPS"); }
     else state.gpsState = err.code === 2 ? "No signal" : "Timeout";
@@ -281,11 +339,12 @@
     else log("Motion sensors unavailable or denied");
     if (!window.isSecureContext) log("Not HTTPS: sensors may be blocked");
     await requestWake();
+    if (W() && W().available()) startWireless();
     updateStats();
   }
   function stopTracking() {
     state.tracking = false;
-    stopCompass(); stopMotion(); stopGps(); releaseWake();
+    stopCompass(); stopMotion(); stopGps(); stopWireless(); releaseWake();
     state.heading = null; state.motionDetected = false; state.smooth = state.prevSmooth = 0;
     updateStats();
   }
@@ -316,6 +375,13 @@
     $("carry-mode").addEventListener("change", updateStats);
     $("heading-offset").addEventListener("input", () => { setText("offset-label", `${$("heading-offset").value}°`); updateStats(); });
     $("export-track").addEventListener("click", exportTrack);
+    $("learn-here").addEventListener("click", learnHere);
+    $("export-db").addEventListener("click", () => W() && exportDb());
+    $("import-db").addEventListener("change", async e => {
+      try { W().importDb(JSON.parse(await e.target.files[0].text())); setText("assistant-message", "Imported wireless database."); }
+      catch { setText("assistant-message", "Could not read that file."); }
+      e.target.value = "";
+    });
     $("reset-calibration").addEventListener("click", () => {
       state.stepScale = 1; state.autoOffset = 0; store.set("poma.scale", "1"); log("Calibration reset"); updateStats();
     });
