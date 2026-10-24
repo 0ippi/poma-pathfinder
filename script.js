@@ -94,9 +94,9 @@
     if (!state.map || !state.pos) return;
     const ll = [state.pos.lat, state.pos.lon];
     if (!state.posMarker) {
-      state.posMarker = L.circleMarker(ll, { radius: 7, color: "#67e0bd", fillColor: "#67e0bd", fillOpacity: 1 }).addTo(state.map);
-      state.errCircle = L.circle(ll, { radius: state.sigma, color: "#67e0bd", weight: 1, fillOpacity: 0.12 }).addTo(state.map);
-      state.trail = L.polyline([ll], { color: "#1b8f72", weight: 3 }).addTo(state.map);
+      state.posMarker = L.circleMarker(ll, { radius: 7, color: "#38BDF8", fillColor: "#38BDF8", fillOpacity: 1 }).addTo(state.map);
+      state.errCircle = L.circle(ll, { radius: state.sigma, color: "#38BDF8", weight: 1, fillOpacity: 0.12 }).addTo(state.map);
+      state.trail = L.polyline([ll], { color: "#0284C7", weight: 3 }).addTo(state.map);
     } else {
       state.posMarker.setLatLng(ll);
       state.errCircle.setLatLng(ll).setRadius(state.sigma);

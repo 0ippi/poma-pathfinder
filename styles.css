@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 * {
   box-sizing: border-box;
@@ -5,20 +6,20 @@
 
 :root {
   color-scheme: dark;
-  --bg: #101820;
-  --card: #192630;
-  --card2: #223440;
-  --text: #eef5f7;
-  --muted: #a9bbc5;
-  --accent: #67e0bd;
-  --border: #344a56;
+  --bg: #080D1A;
+  --card: #0F172A;
+  --card2: #1E293B;
+  --text: #F8FAFC;
+  --muted: #94A3B8;
+  --accent: #38BDF8;
+  --border: #263449;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   line-height: 1.5;
 }
 
@@ -105,7 +106,7 @@ h2 {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background: #101820e8;
+  background: #080D1Ae8;
   border: 1px solid #ffffff55;
   border-radius: 50%;
   pointer-events: none;
@@ -158,7 +159,7 @@ input {
   width: 100%;
   padding: 12px;
   color: var(--text);
-  background: #0f1920;
+  background: #0B1220;
   border: 1px solid var(--border);
   border-radius: 9px;
   font: inherit;
@@ -180,7 +181,7 @@ button {
 
 button.primary {
   background: var(--accent);
-  color: #08221b;
+  color: #04121f;
   border-color: var(--accent);
 }
 
@@ -226,10 +227,10 @@ footer {
 }
 
 /* v6 additions */
-select { width:100%; padding:12px; color:var(--text); background:#0f1920; border:1px solid var(--border); border-radius:9px; font:inherit; }
+select { width:100%; padding:12px; color:var(--text); background:#0B1220; border:1px solid var(--border); border-radius:9px; font:inherit; }
 .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .hint { color:var(--muted); font-size:.8rem; margin:6px 0 0; }
-.log { margin:12px 0 0; padding:10px; max-height:140px; overflow:auto; background:#0f1920; border-radius:9px; font:.75rem/1.4 ui-monospace,monospace; color:var(--muted); white-space:pre-wrap; }
+.log { margin:12px 0 0; padding:10px; max-height:140px; overflow:auto; background:#0B1220; border-radius:9px; font:.75rem/1.4 ui-monospace,monospace; color:var(--muted); white-space:pre-wrap; }
 .warn { color:#ffd479; }
 button:disabled { opacity:.45; cursor:not-allowed; }
 .pulse { animation:pulse .25s ease-out; }
@@ -243,3 +244,28 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 details { margin-top:14px; border-top:1px solid var(--border); padding-top:10px; }
 summary { cursor:pointer; font-weight:bold; padding:6px 0; }
 .full { grid-column:1 / -1; }
+
+/* v9 POMA theme */
+body { background: radial-gradient(ellipse at 50% -10%, rgba(56,189,248,.14), transparent 55%), var(--bg); background-attachment: fixed; min-height: 100vh; }
+.topbar { background: rgba(15,23,42,.8); backdrop-filter: blur(12px); position: sticky; top: 0; z-index: 2000; }
+.brand { display:flex; align-items:center; gap:14px; }
+.brand-mark { width:44px; height:auto; filter: drop-shadow(0 0 12px rgba(56,189,248,.3)); }
+h1 { font-size:1.5rem; font-weight:500; letter-spacing:.38em; line-height:1; }
+.eyebrow { font-weight:500; letter-spacing:.06em; margin:6px 0 0; color: var(--muted); font-size:.72rem; }
+.pill { border-radius:999px; background:rgba(56,189,248,.12); border-color:rgba(56,189,248,.3); font-size:.8rem; }
+.card { border-radius:20px; box-shadow:0 20px 40px -20px rgba(0,0,0,.6); }
+h2 { font-weight:600; letter-spacing:-.01em; }
+#map { border-radius:14px; border:1px solid var(--border); }
+#compass { border-color: rgba(56,189,248,.35); box-shadow:0 0 16px rgba(56,189,248,.2); }
+.stat { background: rgba(30,41,59,.55); border:1px solid rgba(51,65,85,.5); border-radius:12px; }
+.stat span { text-transform:none; letter-spacing:.02em; }
+.banner { background: rgba(56,189,248,.08); border-left-color: var(--accent); border-radius:12px; color:#E2E8F0; }
+button { border-radius:12px; transition: background .15s, transform .05s; }
+button:hover { background:#334155; }
+button:active { transform: translateY(1px); }
+button.primary:hover { background:#7DD3FC; }
+.stop, .stop:hover { background:#DC2626; border-color:#EF4444; color:#fff; }
+input, select { border-radius:12px; }
+input[type=range] { padding:0; accent-color: var(--accent); }
+summary { color:#E2E8F0; }
+@media (max-width:720px){ h1{font-size:1.25rem; letter-spacing:.3em;} .brand-mark{width:38px;} .eyebrow{font-size:.66rem;} }
