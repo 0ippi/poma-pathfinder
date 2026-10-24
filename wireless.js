@@ -73,16 +73,19 @@
 
   /* --- 3. Online database (BeaconDB, Mozilla Location Service format). Needs internet and
          crowd-sourced coverage; typical accuracy tens to hundreds of metres. --- */
+  let lastOnline = "";
   async function locateOnline(sc) {
-    if (sc.wifi.length < 2 || navigator.onLine === false) return null;
+    if (sc.wifi.length < 2) { lastOnline = "Too few Wi-Fi for lookup"; return null; }
+    if (navigator.onLine === false) { lastOnline = "No internet"; return null; }
     const body = { considerIp: false, wifiAccessPoints: sc.wifi.slice(0, 25).map(w => ({ macAddress: w.bssid, signalStrength: w.rssi, frequency: w.freq })) };
     if (sc.ble.length) body.bluetoothBeacons = sc.ble.slice(0, 15).filter(b => /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(b.id)).map(b => ({ macAddress: b.id, signalStrength: b.rssi }));
     try {
       const r = await fetch("https://api.beacondb.net/v1/geolocate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!r.ok) return null;
+      if (!r.ok) { lastOnline = r.status === 404 ? "BeaconDB: area not in database" : `BeaconDB: HTTP ${r.status}`; return null; }
       const j = await r.json();
+      lastOnline = "BeaconDB: ok";
       return j && j.location ? { lat: j.location.lat, lon: j.location.lng, acc: Math.max(15, j.accuracy || 100), src: "Wi-Fi database (BeaconDB)" } : null;
-    } catch { return null; }
+    } catch (e) { lastOnline = "BeaconDB unreachable: " + (e && e.message || e); return null; }
   }
 
   async function locate(sc) {
@@ -106,5 +109,5 @@
   }
 
   window.PomaWireless = { available, prepare, scan, locate, learn, exportDb, importDb,
-    counts: () => ({ fingerprints: fingerprints.length, beacons: Object.keys(beacons).length }) };
+    online: () => lastOnline, counts: () => ({ fingerprints: fingerprints.length, beacons: Object.keys(beacons).length }) };
 })();

@@ -263,7 +263,7 @@
         t += ` · ${fix.src} ±${Math.round(fix.acc)} m`;
         if (!state.origin) setOriginAt(fix.lat, fix.lon, fix.acc, fix.src);
         else fuse(fix.lat, fix.lon, fix.acc, fix.src);
-      } else t += " · no position match";
+      } else t += " · no position match" + (W().online() ? ` (${W().online()})` : "");
       state.wlText = t;
     } catch (e) { state.wlText = "Scan failed: " + (e && e.message || e); }
     updateStats();
