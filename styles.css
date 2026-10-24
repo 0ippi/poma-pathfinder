@@ -1,90 +1,97 @@
 
-:root {
-  color-scheme: dark;
-  --background: #08111f;
-  --panel: #111d2e;
-  --border: #26364b;
-  --text: #edf5ff;
-  --muted: #9aacc2;
-  --accent: #37dfbd;
-  --blue: #16a5ff;
-}
-
 * {
   box-sizing: border-box;
 }
 
+:root {
+  color-scheme: dark;
+  --bg: #101820;
+  --card: #192630;
+  --card2: #223440;
+  --text: #eef5f7;
+  --muted: #a9bbc5;
+  --accent: #67e0bd;
+  --border: #344a56;
+}
+
 body {
   margin: 0;
-  background: var(--background);
+  background: var(--bg);
   color: var(--text);
-  font-family: Arial, sans-serif;
+  font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
 
-header {
-  padding: 22px 20px;
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px;
   border-bottom: 1px solid var(--border);
-  background: #0c1727;
+}
+
+h1, h2, p {
+  margin-top: 0;
 }
 
 h1 {
-  margin: 0;
-  font-size: 26px;
-}
-
-h1 span {
-  color: var(--accent);
-}
-
-header p {
-  margin: 6px 0 0;
-  color: var(--accent);
-  font-size: 13px;
-}
-
-main {
-  width: min(100% - 28px, 1000px);
-  margin: 22px auto;
-  display: grid;
-  gap: 18px;
-}
-
-.panel {
-  min-width: 0;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel);
+  margin-bottom: 0;
 }
 
 h2 {
-  margin: 0 0 8px;
-  font-size: 20px;
+  font-size: 1.2rem;
+  margin-bottom: 8px;
 }
 
-h3 {
-  margin: 0 0 6px;
-  font-size: 16px;
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  font-weight: bold;
+  margin-bottom: 5px;
 }
 
-.muted,
-#map-status,
-#sensor-status,
-#alternative-info {
+.pill {
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 20px;
+  padding: 7px 12px;
+}
+
+.layout {
+  width: min(1100px, 100%);
+  margin: auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.card {
+  min-width: 0;
+  padding: 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.muted, .note {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.9rem;
+}
+
+.note {
+  font-size: 0.8rem;
+  margin-top: 12px;
 }
 
 #map {
-  position: relative;
-  width: 100%;
   height: 350px;
-  margin: 14px 0;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  position: relative;
   overflow: hidden;
-  background: #dce6eb;
+  border-radius: 12px;
+  background: #dbe5e8;
 }
 
 #compass {
@@ -92,137 +99,128 @@ h3 {
   z-index: 1000;
   top: 12px;
   right: 12px;
-  width: 60px;
-  height: 78px;
+  width: 85px;
+  height: 85px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  background: #111d2e;
-  border: 2px solid var(--accent);
-  border-radius: 30px;
-  color: var(--text);
-  box-shadow: 0 2px 10px #0008;
+  align-items: center;
+  background: #101820e8;
+  border: 1px solid #ffffff55;
+  border-radius: 50%;
   pointer-events: none;
 }
 
 #compass-arrow {
+  font-size: 2rem;
+  line-height: 1.2;
   color: var(--accent);
-  font-size: 36px;
-  line-height: 1.1;
-  transform: rotate(0deg);
-  transition: transform 0.15s linear;
 }
 
 #compass-label {
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 0.7rem;
 }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 16px 0;
 }
 
-.stats > div,
-.status-card {
+.stat {
   padding: 12px;
-  border: 1px solid var(--border);
+  background: var(--card2);
   border-radius: 10px;
-  background: #0b1625;
+  min-width: 0;
+}
+
+.stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 5px;
+}
+
+.stat strong {
   overflow-wrap: anywhere;
+  font-size: 0.9rem;
 }
 
-.status-card {
-  margin: 12px 0;
-}
-
-.status-card p {
-  margin: 0;
+label {
+  display: block;
+  margin: 12px 0 6px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.85rem;
 }
 
-small {
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: 1px;
-}
-
-.stats p {
-  margin: 5px 0 0;
-  font-weight: bold;
-  font-size: 15px;
+input {
+  width: 100%;
+  padding: 12px;
+  color: var(--text);
+  background: #0f1920;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: inherit;
+  margin-bottom: 5px;
 }
 
 button {
-  margin: 5px 5px 5px 0;
-  padding: 11px 15px;
-  border: 0;
+  padding: 11px 14px;
+  margin: 8px 6px 0 0;
+  min-height: 42px;
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: var(--accent);
-  color: #062019;
-  font-size: 14px;
+  background: var(--card2);
+  color: var(--text);
+  font: inherit;
   font-weight: bold;
   cursor: pointer;
 }
 
-button.secondary {
-  border: 1px solid var(--border);
-  background: #1a2a3e;
-  color: var(--text);
+button.primary {
+  background: var(--accent);
+  color: #08221b;
+  border-color: var(--accent);
 }
 
-button:disabled {
-  opacity: 0.55;
-  cursor: wait;
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-#messages {
-  display: grid;
-  gap: 8px;
-  margin: 14px 0;
-}
-
-.message {
-  margin: 0;
-  padding: 12px;
-  border-radius: 10px;
-  background: #0b1625;
-  overflow-wrap: anywhere;
-}
-
-form {
+.sensor-row {
   display: flex;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
 }
 
-input {
-  flex: 1;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: #08111f;
-  color: var(--text);
-  font-size: 16px;
+.sensor-row strong {
+  text-align: right;
+  font-size: 0.82rem;
 }
 
 footer {
   padding: 20px;
-  color: var(--muted);
-  font-size: 12px;
   text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
-@media (min-width: 760px) {
-  main {
-    grid-template-columns: 1fr 1fr;
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 12px;
   }
 
-  .assistant {
-    grid-column: 1 / -1;
+  .card {
+    padding: 15px;
+  }
+
+  #map {
+    height: 300px;
   }
 }

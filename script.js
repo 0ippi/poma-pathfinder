@@ -1,302 +1,322 @@
 
-const $ = (id) => document.getElementById(id);
+(() => {
+  "use strict";
 
-// --------------------
-// MAP AND GPS
-// --------------------
+  const $ = id => document.getElementById(id);
 
-const mapStatus = $("map-status");
-const connection = $("connection");
-
-let map = null;
-let userMarker = null;
-let accuracyCircle = null;
-let gpsWatchId = null;
-
-function initializeMap() {
-  if (typeof L === "undefined") {
-    mapStatus.textContent =
-      "Karttakirjasto ei latautunut. Tarkista internetyhteys.";
-    return;
-  }
-
-  map = L.map("map").setView([61.4991, 23.7871], 12);
-
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-  }).addTo(map);
-
-  mapStatus.textContent =
-    "Kartta valmis. Paina Find my location.";
-
-  requestAnimationFrame(() => map.invalidateSize());
-}
-
-function showLocation(position) {
-  const { latitude, longitude, accuracy } = position.coords;
-  const point = [latitude, longitude];
-
-  $("gps-lat").textContent = latitude.toFixed(6);
-  $("gps-lon").textContent = longitude.toFixed(6);
-  $("gps-accuracy").textContent = `±${Math.round(accuracy)} m`;
-
-  if (!map) {
-    mapStatus.textContent = "Sijainti saatiin, mutta kartta ei ole valmis.";
-    return;
-  }
-
-  if (!userMarker) {
-    userMarker = L.circleMarker(point, {
-      radius: 8,
-      color: "#ffffff",
-      weight: 3,
-      fillColor: "#16a5ff",
-      fillOpacity: 1
-    }).addTo(map);
-
-    userMarker.bindPopup("Puhelimen ilmoittama sijainti");
-
-    accuracyCircle = L.circle(point, {
-      radius: accuracy,
-      color: "#16a5ff",
-      fillColor: "#16a5ff",
-      fillOpacity: 0.12,
-      weight: 2
-    }).addTo(map);
-  } else {
-    userMarker.setLatLng(point);
-    accuracyCircle.setLatLng(point);
-    accuracyCircle.setRadius(accuracy);
-  }
-
-  map.setView(point, 16);
-  mapStatus.textContent =
-    `Sijainti päivitetty. Ilmoitettu tarkkuus noin ${Math.round(accuracy)} m.`;
-  connection.textContent = "● Sijainti saatavilla";
-}
-
-function showLocationError(error) {
-  const messages = {
-    1: "Sijaintilupa evättiin. Salli sijainnin käyttö selaimen asetuksista.",
-    2: "Sijaintia ei saatu. Tarkista puhelimen sijaintiasetukset.",
-    3: "Paikannus aikakatkaistiin. Yritä uudelleen."
+  const state = {
+    map: null,
+    marker: null,
+    origin: null,
+    heading: null,
+    orientationHandler: null,
+    motionHandler: null,
+    motionDetected: false
   };
 
-  mapStatus.textContent =
-    messages[error.code] || "Sijainnin hakeminen epäonnistui.";
-  connection.textContent = "● Sijainti ei saatavilla";
-}
-
-function requestLocation() {
-  if (!window.isSecureContext) {
-    mapStatus.textContent = "Paikannus vaatii HTTPS-yhteyden.";
-    return;
+  function setText(id, value) {
+    $(id).textContent = value;
   }
 
-  if (!navigator.geolocation) {
-    mapStatus.textContent = "Selain ei tue paikannusta.";
-    return;
-  }
+  function updateStats() {
+    setText(
+      "heading-value",
+      state.heading === null
+        ? "Unknown"
+        : `${Math.round(state.heading)}°`
+    );
 
-  mapStatus.textContent = "Haetaan sijaintia...";
+    setText(
+      "position-status",
+      state.origin ? "Reference point set" : "No reference point"
+    );
 
-  navigator.geolocation.getCurrentPosition(
-    showLocation,
-    showLocationError,
-    {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 0
+    setText(
+      "accuracy-value",
+      state.origin ? "Not verified" : "Unknown"
+    );
+
+    setText(
+      "compass-status",
+      state.heading === null ? "No heading" : "Active"
+    );
+
+    setText(
+      "motion-status",
+      state.motionDetected ? "Sensor events received" : "Waiting"
+    );
+
+    setText(
+      "motion-value",
+      state.motionDetected ? "Movement sensor active" : "Not detected"
+    );
+
+    if (state.heading !== null) {
+      $("compass-arrow").style.transform =
+        `rotate(${state.heading}deg)`;
+
+      setText("compass-label", `${Math.round(state.heading)}°`);
     }
-  );
-}
-
-$("enable-gps").addEventListener("click", requestLocation);
-
-$("follow-gps").addEventListener("click", () => {
-  if (!window.isSecureContext || !navigator.geolocation) {
-    mapStatus.textContent =
-      "Jatkuva paikannus vaatii HTTPS-yhteyden ja selaimen tuen.";
-    return;
   }
 
-  if (gpsWatchId !== null) return;
-
-  mapStatus.textContent = "Käynnistetään jatkuvaa paikannusta...";
-
-  gpsWatchId = navigator.geolocation.watchPosition(
-    showLocation,
-    showLocationError,
-    {
-      enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 20000
-    }
-  );
-
-  $("follow-gps").disabled = true;
-});
-
-$("stop-gps").addEventListener("click", () => {
-  if (gpsWatchId !== null) {
-    navigator.geolocation.clearWatch(gpsWatchId);
-    gpsWatchId = null;
-  }
-
-  $("follow-gps").disabled = false;
-  mapStatus.textContent = "Jatkuva paikannus pysäytetty.";
-});
-
-// --------------------
-// PHONE SENSORS AND COMPASS
-// --------------------
-
-let sensorsStarted = false;
-
-function getCompassHeading(event) {
-  // iOS Safari voi antaa suoran kompassisuunnan.
-  if (typeof event.webkitCompassHeading === "number") {
-    return event.webkitCompassHeading;
-  }
-
-  // Tämä on arvio, ei taattu kompassisuunta kaikissa laitteissa.
-  if (typeof event.alpha === "number") {
-    return (360 - event.alpha) % 360;
-  }
-
-  return null;
-}
-
-function updateCompass(event) {
-  const heading = getCompassHeading(event);
-  if (heading === null) return;
-
-  const degrees = Math.round(heading);
-  const directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-  const direction = directions[Math.round(degrees / 45) % 8];
-
-  $("real-heading").textContent = `${direction} · ${degrees}°`;
-  $("compass-arrow").style.transform = `rotate(${degrees}deg)`;
-  $("compass-label").textContent = direction;
-}
-
-$("enable-sensors").addEventListener("click", async () => {
-  const status = $("sensor-status");
-  const button = $("enable-sensors");
-
-  if (sensorsStarted) {
-    status.textContent = "Sensorit ovat jo käytössä.";
-    return;
-  }
-
-  button.disabled = true;
-  status.textContent = "Pyydetään sensorien käyttöoikeutta...";
-
-  try {
-    if (!window.isSecureContext) {
-      throw new Error("Sensorit vaativat HTTPS-yhteyden.");
+  function initMap() {
+    if (!window.L) {
+      setText(
+        "map-note",
+        "Map library unavailable. Check your internet connection."
+      );
+      return;
     }
 
-    if (typeof DeviceOrientationEvent === "undefined") {
-      throw new Error("Selain ei tue suunta-anturia.");
-    }
+    state.map = L.map("map").setView([61.4981, 23.7600], 12);
 
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const permission =
-        await DeviceOrientationEvent.requestPermission();
-
-      if (permission !== "granted") {
-        throw new Error("Suunta-anturin käyttöoikeus evättiin.");
+    L.tileLayer(
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap"
       }
+    ).addTo(state.map);
+  }
+
+  function setOrigin() {
+    const latInput = $("start-lat").value.trim();
+    const lonInput = $("start-lon").value.trim();
+    const lat = Number(latInput);
+    const lon = Number(lonInput);
+
+    if (
+      !latInput ||
+      !lonInput ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      lat < -90 || lat > 90 ||
+      lon < -180 || lon > 180
+    ) {
+      setText(
+        "assistant-message",
+        "Enter valid coordinates for a known starting point."
+      );
+      return;
     }
 
-    window.addEventListener("deviceorientation", updateCompass);
+    state.origin = { lat, lon };
 
-    window.addEventListener("devicemotion", (event) => {
-      const a = event.accelerationIncludingGravity;
+    if (state.map) {
+      const coords = [lat, lon];
 
-      if (a && a.x !== null && a.y !== null && a.z !== null) {
-        $("real-motion").textContent =
-          `X ${a.x.toFixed(1)} · Y ${a.y.toFixed(1)} · Z ${a.z.toFixed(1)}`;
+      if (!state.marker) {
+        state.marker = L.marker(coords).addTo(state.map);
+      } else {
+        state.marker.setLatLng(coords);
       }
+
+      state.map.setView(coords, 16);
+    }
+
+    setText(
+      "map-note",
+      "The marker shows the manually entered starting point, not a live position."
+    );
+
+    setText(
+      "assistant-message",
+      "Starting point saved. Sensor-based movement tracking is not yet implemented."
+    );
+
+    updateStats();
+  }
+
+  function startCompass() {
+    if (state.orientationHandler) {
+      window.removeEventListener(
+        "deviceorientation",
+        state.orientationHandler,
+        true
+      );
+    }
+
+    state.orientationHandler = event => {
+      let heading = null;
+
+      if (typeof event.webkitCompassHeading === "number") {
+        heading = event.webkitCompassHeading;
+      } else if (typeof event.alpha === "number") {
+        heading = 360 - event.alpha;
+      }
+
+      if (heading !== null && Number.isFinite(heading)) {
+        state.heading = ((heading % 360) + 360) % 360;
+        updateStats();
+      }
+    };
+
+    window.addEventListener(
+      "deviceorientation",
+      state.orientationHandler,
+      true
+    );
+  }
+
+  function startMotion() {
+    if (state.motionHandler) {
+      window.removeEventListener(
+        "devicemotion",
+        state.motionHandler,
+        true
+      );
+    }
+
+    state.motionHandler = event => {
+      const acceleration = event.accelerationIncludingGravity;
+
+      if (
+        acceleration &&
+        [acceleration.x, acceleration.y, acceleration.z]
+          .some(value => typeof value === "number")
+      ) {
+        state.motionDetected = true;
+        updateStats();
+      }
+    };
+
+    window.addEventListener(
+      "devicemotion",
+      state.motionHandler,
+      true
+    );
+  }
+
+  async function enableSensors() {
+    const messages = [];
+
+    try {
+      if (
+        typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function"
+      ) {
+        const result =
+          await DeviceOrientationEvent.requestPermission();
+
+        if (result === "granted") {
+          startCompass();
+        } else {
+          messages.push("Compass permission denied");
+        }
+      } else if (typeof DeviceOrientationEvent !== "undefined") {
+        startCompass();
+      } else {
+        messages.push("Compass sensor unavailable");
+      }
+    } catch {
+      messages.push("Could not start compass");
+    }
+
+    try {
+      if (
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function"
+      ) {
+        const result = await DeviceMotionEvent.requestPermission();
+
+        if (result === "granted") {
+          startMotion();
+        } else {
+          messages.push("Motion permission denied");
+        }
+      } else if (typeof DeviceMotionEvent !== "undefined") {
+        startMotion();
+      } else {
+        messages.push("Motion sensors unavailable");
+      }
+    } catch {
+      messages.push("Could not start motion sensors");
+    }
+
+    setText(
+      "sensor-status",
+      messages.length
+        ? messages.join(". ")
+        : "Sensor startup requested. Check the statuses below."
+    );
+
+    updateStats();
+  }
+
+  function stopSensors() {
+    if (state.orientationHandler) {
+      window.removeEventListener(
+        "deviceorientation",
+        state.orientationHandler,
+        true
+      );
+    }
+
+    if (state.motionHandler) {
+      window.removeEventListener(
+        "devicemotion",
+        state.motionHandler,
+        true
+      );
+    }
+
+    state.orientationHandler = null;
+    state.motionHandler = null;
+    state.heading = null;
+    state.motionDetected = false;
+
+    setText("sensor-status", "Sensor listening stopped.");
+    updateStats();
+  }
+
+  function explainPositioning() {
+    setText(
+      "assistant-message",
+      "GPS-free positioning needs reference information. A compass gives direction, not location. Motion sensors can estimate movement but drift over time. Wi-Fi positioning needs network identifiers and a location database or service. Bluetooth positioning needs known beacons. These systems are not implemented in this prototype yet."
+    );
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    initMap();
+
+    $("set-origin").addEventListener("click", setOrigin);
+    $("enable-sensors").addEventListener("click", enableSensors);
+    $("stop-sensors").addEventListener("click", stopSensors);
+    $("explain-positioning").addEventListener(
+      "click",
+      explainPositioning
+    );
+
+    $("reset-estimate").addEventListener("click", () => {
+      if (!state.origin) {
+        setText("assistant-message", "Set a starting point first.");
+        return;
+      }
+
+      if (state.map) {
+        state.map.setView(
+          [state.origin.lat, state.origin.lon],
+          16
+        );
+      }
+
+      setText(
+        "assistant-message",
+        "Map returned to the manually set starting point."
+      );
     });
 
-    sensorsStarted = true;
-    status.textContent =
-      "Sensorit käynnistetty. Käännä puhelinta ja tarkkaile kompassia.";
-  } catch (error) {
-    status.textContent =
-      error.message || "Sensorien käyttö epäonnistui.";
-  } finally {
-    button.disabled = false;
-  }
-});
+    $("center-map").addEventListener("click", () => {
+      if (!state.map) return;
 
-// --------------------
-// WI-FI AND BLUETOOTH INFORMATION
-// --------------------
+      state.map.setView(
+        state.origin
+          ? [state.origin.lat, state.origin.lon]
+          : [61.4981, 23.7600],
+        state.origin ? 16 : 12
+      );
+    });
 
-$("check-alternatives").addEventListener("click", () => {
-  $("wifi-status").textContent =
-    "Tavallinen verkkosivu ei voi skannata ympäristön Wi-Fi-verkkoja tai lukea niiden signaalivahvuuksia suoraan.";
-
-  $("bluetooth-status").textContent =
-    "Web Bluetooth ei tue taustalla tehtävää ympäristön skannausta, eikä sitä tueta kaikissa selaimissa.";
-
-  $("alternative-info").textContent =
-    "Find my location käyttää selaimen paikannuspalvelua. Puhelimen käyttöjärjestelmä voi yhdistää GPS:n, Wi-Fin, mobiiliverkon ja muut lähteet automaattisesti. Erillinen Wi-Fi/Bluetooth-paikannus vaatii tuetun natiivisovelluksen tai ulkoisen laitteiston.";
-});
-
-// --------------------
-// SIMPLE OFFLINE ASSISTANT
-// --------------------
-
-const chatForm = $("chat-form");
-const questionInput = $("question");
-const messages = $("messages");
-
-chatForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  const question = questionInput.value.trim();
-  if (!question) return;
-
-  addMessage(`You: ${question}`);
-
-  const q = question.toLowerCase();
-  let answer;
-
-  if (q.includes("gps") || q.includes("location") || q.includes("paikannus")) {
-    answer =
-      "Poma näyttää selaimen ilmoittaman sijainnin. Puhelimen käyttöjärjestelmä voi käyttää GPS:ää, Wi-Fiä ja mobiiliverkkoa sijainnin arvioimiseen.";
-  } else if (q.includes("wifi")) {
-    answer =
-      "Verkkosivu ei voi suoraan skannata Wi-Fi-verkkoja. Erillinen Wi-Fi-paikannus tarvitsee natiivisovelluksen tai ulkoisen palvelun.";
-  } else if (q.includes("bluetooth")) {
-    answer =
-      "Bluetooth-majakoita voidaan käyttää sisäpaikannukseen, mutta tavallinen verkkosivu ei voi skannata niitä jatkuvasti taustalla.";
-  } else if (q.includes("compass") || q.includes("heading") || q.includes("suunta")) {
-    answer =
-      "Kompassi käyttää puhelimen suunta-anturia. Lukema voi olla epätarkka ja vaatia kalibrointia.";
-  } else if (q.includes("offline")) {
-    answer =
-      "Sovelluksen käyttöliittymä voi toimia offline-tilassa, mutta kartta tarvitsee tallennetut karttatiedot tai internetyhteyden.";
-  } else {
-    answer =
-      "Olen Poman esittelyavustaja. Käytän valmiita vastauksia enkä ole yhteydessä oikeaan tekoälyyn.";
-  }
-
-  addMessage(`Poma: ${answer}`);
-  questionInput.value = "";
-});
-
-function addMessage(text) {
-  const p = document.createElement("p");
-  p.className = "message";
-  p.textContent = text;
-  messages.appendChild(p);
-}
-
-initializeMap();
+    updateStats();
+  });
+})();
