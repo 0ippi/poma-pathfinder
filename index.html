@@ -4,9 +4,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1220">
   <title>Poma Pathfinder</title>
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <header>
     <h1>◈ Poma <span>Pathfinder</span></h1>
@@ -16,19 +18,38 @@
   <main>
     <section class="map-panel">
       <h2>Navigation</h2>
-      <div class="stats">
-  <div>
-    <small>COMPASS</small>
-    <p id="real-heading">Waiting for sensor</p>
-  </div>
-  <div>
-    <small>MOTION</small>
-    <p id="real-motion">Waiting for sensor</p>
-  </div>
-</div>
 
-<button id="enable-sensors">Enable phone sensors</button>
-<p id="sensor-status">Sensors not enabled.</p>
+      <h3>GPS Location</h3>
+      <div class="stats">
+        <div>
+          <small>GPS POSITION</small>
+          <p id="gps-position">Not requested</p>
+        </div>
+        <div>
+          <small>GPS ACCURACY</small>
+          <p id="gps-accuracy">—</p>
+        </div>
+      </div>
+
+      <button id="enable-gps">Get GPS location</button>
+      <p id="gps-status">Location not requested.</p>
+
+      <h3>Phone Sensors</h3>
+      <div class="stats">
+        <div>
+          <small>COMPASS</small>
+          <p id="real-heading">Waiting for sensor</p>
+        </div>
+        <div>
+          <small>MOTION</small>
+          <p id="real-motion">Waiting for sensor</p>
+        </div>
+      </div>
+
+      <button id="enable-sensors">Enable phone sensors</button>
+      <p id="sensor-status">Sensors not enabled.</p>
+
+      <h3>Demo Navigation</h3>
       <div id="map">
         <div class="road road-one"></div>
         <div class="road road-two"></div>
@@ -61,18 +82,28 @@
     <section class="assistant">
       <h2>Poma Assistant</h2>
       <p class="muted">Offline navigation assistant · Demo</p>
+
       <div id="messages">
-        <p class="message">Hello! I can help you understand navigation without GPS. This is a demo, not a real AI.</p>
+        <p class="message">
+          Hello! I can help you understand navigation without GPS.
+          This is a demo, not a real AI.
+        </p>
       </div>
+
       <form id="chat-form">
-        <input id="question" placeholder="Ask Poma..." autocomplete="off">
+        <input
+          id="question"
+          placeholder="Ask Poma..."
+          autocomplete="off"
+        >
         <button type="submit">Send</button>
       </form>
     </section>
   </main>
 
   <footer>
-    Demo data only. No real location or emergency connection.
+    GPS and sensor readings depend on device permissions and availability.
+    Demo map is simulated. No emergency connection.
   </footer>
 
   <script src="script.js"></script>

@@ -1,136 +1,136 @@
 
-let started = false;
-let distance = 0;
-let heading = 0;
-let x = 50;
-let y = 50;
+const $ = (id) => document.getElementById(id);
 
-const position = document.getElementById("position");
-const distanceText = document.getElementById("distance");
-const headingText = document.getElementById("heading");
-const marker = document.getElementById("marker");
-const uncertainty = document.getElementById("uncertainty");
+// GPS
+const gpsButton = $("enable-gps");
+const gpsPosition = $("gps-position");
+const gpsAccuracy = $("gps-accuracy");
+const gpsStatus = $("gps-status");
 
-function updateDisplay() {
-  position.textContent = started
-    ? "Demo position · relative"
-    : "Not established";
+let gpsWatchId = null;
 
-  distanceText.textContent = `${distance} m`;
-  headingText.textContent = `${heading}°`;
-
-  marker.style.left = `${x}%`;
-  marker.style.top = `${y}%`;
-  uncertainty.style.left = `${x}%`;
-  uncertainty.style.top = `${y}%`;
-}
-
-document.getElementById("start").addEventListener("click", () => {
-  started = true;
-  document.getElementById("connection").textContent =
-    "● Offline mode · Simulated data";
-  updateDisplay();
-});
-
-document.getElementById("move").addEventListener("click", () => {
-  if (!started) {
-    alert("Start the demo first.");
+gpsButton.addEventListener("click", () => {
+  if (!("geolocation" in navigator)) {
+    gpsStatus.textContent = "Geolocation is not supported.";
     return;
   }
 
-  distance += 10;
-  heading = (heading + 45) % 360;
-
-  const radians = heading * Math.PI / 180;
-  x = Math.max(8, Math.min(92, x + Math.sin(radians) * 4));
-  y = Math.max(8, Math.min(92, y - Math.cos(radians) * 4));
-
-  uncertainty.style.width =
-    `${90 + distance * 0.3}px`;
-  uncertainty.style.height =
-    `${90 + distance * 0.3}px`;
-
-  updateDisplay();
-});
-
-document.getElementById("reset").addEventListener("click", () => {
-  started = false;
-  distance = 0;
-  heading = 0;
-  x = 50;
-  y = 50;
-  uncertainty.style.width = "90px";
-  uncertainty.style.height = "90px";
-  document.getElementById("connection").textContent =
-    "● Offline mode · Demo";
-  updateDisplay();
-});
-
-document.getElementById("chat-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-
-  const input = document.getElementById("question");
-  const question = input.value.trim().toLowerCase();
-
-  if (!question) return;
-
-  addMessage(input.value, true);
-  input.value = "";
-
-  let answer =
-    "This demo does not have an AI model connected yet. Later, I can help analyze sensor data and environmental clues.";
-
-  if (question.includes("gps") || question.includes("lost")) {
-    answer =
-      "Without GPS, Poma can combine a last known position, compass, motion sensors and recognizable landmarks. This demo does not calculate a real location.";
-  } else if (question.includes("sensor") || question.includes("compass")) {
-    answer =
-      "The compass can estimate direction, while motion sensors help estimate movement. Sensor errors accumulate over time.";
-  } else if (question.includes("location") || question.includes("sijaint")) {
-    answer =
-      started
-        ? "The displayed position is simulated. Poma does not know your real location."
-        : "No position has been established. Start the demo to see a simulated relative position.";
+  if (!window.isSecureContext) {
+    gpsStatus.textContent = "GPS requires HTTPS or localhost.";
+    return;
   }
 
-  addMessage(answer, false);
+  gpsButton.disabled = true;
+  gpsStatus.textContent = "Requesting location permission...";
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      showGPS(position);
+      gpsStatus.textContent = "GPS location received.";
+      gpsButton.disabled = false;
+    },
+    (error) => {
+      gpsStatus.textContent = gpsError(error);
+      gpsButton.disabled = false;
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    }
+  );
 });
 
-function addMessage(text, isUser) {
-  const message = document.createElement("p");
-  message.className = "message";
-  message.textContent = (isUser ? "You: " : "Poma: ") + text;
-  document.getElementById("messages").appendChild(message);
-  message.scrollIntoView({ block: "end", behavior: "smooth" });
+function showGPS(position) {
+  const lat = position.coords.latitude;
+  const lon = position.coords.longitude;
+  const accuracy = position.coords.accuracy;
+
+  gpsPosition.textContent =
+    `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+
+  gpsAccuracy.textContent = `±${Math.round(accuracy)} m`;
 }
 
-updateDisplay();
+function gpsError(error) {
+  switch (error.code) {
+    case 1:
+      return "Location permission denied. Allow location access in Chrome.";
+    case 2:
+      return "Position unavailable. Check phone location settings.";
+    case 3:
+      return "Location request timed out. Try again.";
+    default:
+      return "Could not obtain location.";
+  }
+}
 
+// Optional continuous GPS updates
+// Call startGPSUpdates() when you want continuous tracking.
+function startGPSUpdates() {
+  if (!navigator.geolocation || !window.isSecureContext) {
+    gpsStatus.textContent = "GPS requires a supported browser and HTTPS.";
+    return;
+  }
 
-const enableButton = document.getElementById("enable-sensors");
-const realHeading = document.getElementById("real-heading");
-const realMotion = document.getElementById("real-motion");
-const sensorStatus = document.getElementById("sensor-status");
+  if (gpsWatchId !== null) return;
 
-enableButton.addEventListener("click", async () => {
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      showGPS(position);
+      gpsStatus.textContent = "Live location updates active.";
+    },
+    (error) => {
+      gpsStatus.textContent = gpsError(error);
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 15000
+    }
+  );
+}
+
+function stopGPSUpdates() {
+  if (gpsWatchId !== null) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+    gpsStatus.textContent = "Live location updates stopped.";
+  }
+}
+
+// Phone sensors
+const sensorButton = $("enable-sensors");
+const realHeading = $("real-heading");
+const realMotion = $("real-motion");
+const sensorStatus = $("sensor-status");
+
+sensorButton.addEventListener("click", async () => {
+  sensorButton.disabled = true;
+  sensorStatus.textContent = "Checking sensor access...";
+
   try {
+    if (!window.isSecureContext) {
+      throw new Error("Sensors require HTTPS.");
+    }
+
     if (typeof DeviceOrientationEvent === "undefined") {
-      sensorStatus.textContent = "Compass sensor unavailable.";
-      return;
+      throw new Error("Orientation sensor unavailable.");
     }
 
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const permission = await DeviceOrientationEvent.requestPermission();
+      const permission =
+        await DeviceOrientationEvent.requestPermission();
 
       if (permission !== "granted") {
-        sensorStatus.textContent = "Sensor permission denied.";
-        return;
+        throw new Error("Orientation permission denied.");
       }
     }
 
     window.addEventListener("deviceorientation", (event) => {
       if (event.alpha !== null) {
-        realHeading.textContent = `${Math.round(event.alpha)}° (raw)`;
+        realHeading.textContent =
+          `${Math.round(event.alpha)}° (raw)`;
       }
     });
 
@@ -143,9 +143,116 @@ enableButton.addEventListener("click", async () => {
       }
     });
 
-    sensorStatus.textContent = "Sensor access requested.";
-  } catch (error) {
     sensorStatus.textContent =
-      "Sensors unavailable. Check browser permissions and HTTPS.";
+      "Listening for sensor readings. Move your phone to test.";
+  } catch (error) {
+    sensorStatus.textContent = error.message ||
+      "Could not access sensors. Check browser permissions.";
+  } finally {
+    sensorButton.disabled = false;
   }
 });
+
+// Demo navigation
+const map = $("map");
+const marker = $("marker");
+const uncertainty = $("uncertainty");
+const position = $("position");
+const distance = $("distance");
+const heading = $("heading");
+
+let demoDistance = 0;
+let demoX = 50;
+let demoY = 50;
+let demoHeading = 0;
+
+function updateDemo() {
+  position.textContent = "Simulated position";
+  distance.textContent = `${demoDistance} m`;
+  heading.textContent =
+    `${compassLabel(demoHeading)} · ${demoHeading}°`;
+
+  marker.style.left = `${demoX}%`;
+  marker.style.top = `${demoY}%`;
+
+  if (uncertainty) {
+    const size = Math.min(12 + demoDistance / 8, 45);
+    uncertainty.style.width = `${size}%`;
+    uncertainty.style.height = `${size}%`;
+    uncertainty.style.left = `${demoX}%`;
+    uncertainty.style.top = `${demoY}%`;
+  }
+}
+
+function compassLabel(degrees) {
+  return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][
+    Math.round(degrees / 45) % 8
+  ];
+}
+
+$("start").addEventListener("click", () => {
+  demoDistance = 0;
+  demoX = 50;
+  demoY = 50;
+  demoHeading = 0;
+  updateDemo();
+});
+
+$("move").addEventListener("click", () => {
+  demoDistance += 10;
+  demoHeading = (demoHeading + 45) % 360;
+
+  demoX = Math.max(10, Math.min(90, demoX + Math.cos(demoHeading * Math.PI / 180) * 5));
+  demoY = Math.max(10, Math.min(90, demoY + Math.sin(demoHeading * Math.PI / 180) * 5));
+
+  updateDemo();
+});
+
+$("reset").addEventListener("click", () => {
+  demoDistance = 0;
+  demoX = 50;
+  demoY = 50;
+  demoHeading = 0;
+  updateDemo();
+});
+
+updateDemo();
+
+// Simple offline assistant demo
+const chatForm = $("chat-form");
+const questionInput = $("question");
+const messages = $("messages");
+
+chatForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const question = questionInput.value.trim();
+  if (!question) return;
+
+  addMessage(`You: ${question}`);
+
+  const q = question.toLowerCase();
+  let answer;
+
+  if (q.includes("gps")) {
+    answer = "GPS uses satellite signals. Poma can display the position provided by your phone.";
+  } else if (q.includes("wifi")) {
+    answer = "Android may use Wi-Fi networks for location, but a normal webpage cannot directly scan nearby Wi-Fi networks.";
+  } else if (q.includes("compass") || q.includes("heading")) {
+    answer = "The orientation sensor gives a raw orientation reading. It is not always a calibrated compass heading.";
+  } else if (q.includes("offline")) {
+    answer = "Poma's interface works offline once cached, but GPS and sensor availability depend on your device.";
+  } else {
+    answer = "I'm the Poma demo assistant. I can explain GPS, Wi-Fi location and phone sensors, but I am not connected to a real AI.";
+  }
+
+  addMessage(`Poma: ${answer}`);
+  questionInput.value = "";
+});
+
+function addMessage(text) {
+  const p = document.createElement("p");
+  p.className = "message";
+  p.textContent = text;
+  messages.appendChild(p);
+}
