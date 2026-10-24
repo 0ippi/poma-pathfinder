@@ -1,261 +1,113 @@
-/**
- * Poma Pathfinder – wireless.js
- * API: available(), prepare(), scan(), locate(scan), online(),
- *      learn(lat,lon), counts(), exportDb(), importDb(file)
- */
-(function () {
-  'use strict';
+/* Wi-Fi + Bluetooth positioning. Needs the native PomaSensors plugin (Android app).
+   In a normal browser available() is false and nothing here runs. */
+(() => {
+  "use strict";
+  const FP_KEY = "poma.fingerprints", BEACON_KEY = "poma.beacons";
+  const plugin = () => (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PomaSensors) || null;
+  const available = () => !!plugin() && !!(window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  const load = k => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
+  let fingerprints = load(FP_KEY);
+  let beacons = (() => { try { return JSON.parse(localStorage.getItem(BEACON_KEY)) || {}; } catch { return {}; } })();
 
-  const BEACONDB_URL  = 'https://api.beacondb.net/v1/geolocate';
-  const GOOGLE_URL    = '';
-  const BLE_SCAN_MS   = 3500;
-  const MIN_WIFI      = 2;
-  const MIN_RSSI      = -90;
-  const MAX_AGE_MS    = 20000;
-  const LOCAL_ACC_THR = 25;
-  const FP_K          = 3;
-  const FP_MAX_RMS    = 15;
+  const usableWifi = w => w.bssid && w.rssi > -90 && w.ageMs < 20000 &&
+    !(parseInt(w.bssid.slice(0, 2), 16) & 2) &&               // skip locally administered (phone hotspots)
+    !/_nomap$/i.test(w.ssid || "");                            // respect opt-out
+  const toMap = (list, key) => Object.fromEntries(list.map(x => [x[key], x.rssi]));
 
-  let plugin    = null;
-  let statusMsg = '';
-  let db        = null;
-
-  function log(msg) {
-    console.log('[PomaWireless ' + new Date().toTimeString().slice(0, 8) + '] ' + msg);
-    const el = document.getElementById('wireless-log');
-    if (el) el.textContent = msg;
+  async function prepare() {
+    const p = plugin();
+    let s = await p.getStatus();
+    if (!s.wifiPermission || !s.blePermission) s = await p.requestAllPermissions();
+    return s;
   }
 
-  function openDb() {
-    return new Promise((res, rej) => {
-      const r = indexedDB.open('PomaWireless', 2);
-      r.onupgradeneeded = e => {
-        const d = e.target.result;
-        if (!d.objectStoreNames.contains('fingerprints'))
-          d.createObjectStore('fingerprints', { keyPath: 'id', autoIncrement: true });
-        if (!d.objectStoreNames.contains('beacons'))
-          d.createObjectStore('beacons', { keyPath: 'id' });
-      };
-      r.onsuccess = e => res(e.target.result);
-      r.onerror   = e => rej(e.target.error);
-    });
-  }
-  async function ensureDb() { if (!db) db = await openDb(); return db; }
-  async function dbAll(store) {
-    await ensureDb();
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readonly').objectStore(store).getAll();
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
-  }
-  async function dbPut(store, item) {
-    await ensureDb();
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readwrite').objectStore(store).put(item);
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
-  }
-  async function dbClear(store) {
-    await ensureDb();
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readwrite').objectStore(store).clear();
-      r.onsuccess = () => res(); r.onerror = () => rej(r.error);
-    });
+  async function scan(durationMs = 4000) {
+    const p = plugin();
+    const [w, b] = await Promise.allSettled([p.scanWifi(), p.scanBle({ durationMs })]);
+    return {
+      wifi: w.status === "fulfilled" ? w.value.results.filter(usableWifi) : [],
+      ble: b.status === "fulfilled" ? b.value.results.filter(x => x.rssi > -100) : [],
+      throttled: w.status === "fulfilled" && w.value.throttled,
+      errors: [w, b].filter(r => r.status === "rejected").map(r => String(r.reason && (r.reason.message || r.reason)))
+    };
   }
 
-  function filterWifi(aps) {
-    return (aps || []).filter(ap => {
-      if (!ap.bssid) return false;
-      if ((ap.level ?? ap.rssi ?? -999) < MIN_RSSI) return false;
-      if (ap.age != null && ap.age > MAX_AGE_MS) return false;
-      if ((parseInt(ap.bssid.split(':')[0], 16) & 0x02) !== 0) return false;
-      if ((ap.ssid || '').endsWith('_nomap')) return false;
-      return true;
-    }).slice(0, 25);
+  /* --- 1. Fingerprint matching against places the user has surveyed (best: 3-8 m) --- */
+  function fpDistance(cur, fp) {
+    let sum = 0, n = 0, shared = 0;
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(fp)])) {
+      const a = cur[k] ?? -100, b = fp[k] ?? -100;
+      if (cur[k] !== undefined && fp[k] !== undefined) shared++;
+      sum += (a - b) ** 2; n++;
+    }
+    return { d: n ? Math.sqrt(sum / n) : Infinity, shared };
   }
-  function filterBle(devs) {
-    return (devs || []).filter(d => (d.rssi ?? -999) > -100).slice(0, 15);
-  }
-  function isMac(s) { return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(s || ''); }
-  function buildSignalMap(wifi, ble) {
-    const m = {};
-    for (const ap of filterWifi(wifi)) m[ap.bssid] = ap.level ?? ap.rssi;
-    for (const d of filterBle(ble)) m['ble:' + d.id] = d.rssi;
-    return m;
-  }
-  function toArray(v, ...keys) {
-    if (Array.isArray(v)) return v;
-    for (const k of keys) if (Array.isArray(v?.[k])) return v[k];
-    return [];
+  function locateFingerprint(sc) {
+    if (fingerprints.length < 3) return null;
+    const cur = { ...toMap(sc.wifi, "bssid"), ...Object.fromEntries(sc.ble.map(x => ["ble:" + x.id, x.rssi])) };
+    const scored = fingerprints
+      .map(f => ({ f, ...fpDistance(cur, f.s) })).filter(x => x.shared >= 3)
+      .sort((a, b) => a.d - b.d).slice(0, 3);
+    if (!scored.length || scored[0].d > 15) return null;       // unfamiliar place
+    let wsum = 0, lat = 0, lon = 0;
+    for (const x of scored) { const w = 1 / (x.d + 1); wsum += w; lat += w * x.f.lat; lon += w * x.f.lon; }
+    lat /= wsum; lon /= wsum;
+    const spread = Math.max(...scored.map(x => Math.hypot((x.f.lat - lat) * 111320, (x.f.lon - lon) * 111320 * Math.cos(lat * Math.PI / 180))));
+    return { lat, lon, acc: Math.min(60, Math.max(4, spread + scored[0].d * 0.5)), src: "Wi-Fi/BLE fingerprint" };
   }
 
-  async function fingerprintLocate(wifi, ble) {
-    const prints = await dbAll('fingerprints');
-    if (prints.length < 3) return null;
-    const cur = buildSignalMap(wifi, ble);
-    const keys = Object.keys(cur);
-    if (!keys.length) return null;
-    const scored = prints.map(fp => {
-      const shared = keys.filter(k => fp.signals[k] != null);
-      if (shared.length < 3) return null;
-      const rms = Math.sqrt(shared.reduce((s, k) => {
-        const d = cur[k] - fp.signals[k]; return s + d * d;
-      }, 0) / shared.length);
-      return { fp, rms };
-    }).filter(Boolean).sort((a, b) => a.rms - b.rms);
-    if (!scored.length || scored[0].rms > FP_MAX_RMS) return null;
-    const top = scored.slice(0, FP_K);
-    let wLat = 0, wLon = 0, wS = 0;
-    top.forEach(({ fp, rms }) => { const w = 1 / (rms + 1); wLat += fp.lat * w; wLon += fp.lon * w; wS += w; });
-    const lat = wLat / wS, lon = wLon / wS;
-    const spread = top.reduce((mx, { fp }) => Math.max(mx,
-      Math.hypot((fp.lat - lat) * 111320, (fp.lon - lon) * 111320 * Math.cos(lat * Math.PI / 180))), 0);
-    const acc = Math.min(60, Math.max(4, spread + scored[0].rms / 2));
-    log('Sormenjälki: osuma ±' + acc.toFixed(0) + 'm');
-    return { lat, lon, acc, src: 'fingerprint' };
-  }
-
-  async function beaconLocate(ble) {
-    const known = await dbAll('beacons');
+  /* --- 2. Known BLE beacons (imported list with coordinates) --- */
+  function locateBeacons(sc) {
+    const known = sc.ble.filter(b => beacons[b.id]);
     if (!known.length) return null;
-    const hits = filterBle(ble).map(d => {
-      const b = known.find(k => k.id === d.id);
-      if (!b) return null;
-      const dist = Math.pow(10, ((b.txPower ?? d.txPower ?? -59) - d.rssi) / 20);
-      return dist > 30 ? null : { b, dist };
-    }).filter(Boolean);
-    if (!hits.length || (hits.length === 1 && hits[0].dist > 8)) return null;
-    let wLat = 0, wLon = 0, wS = 0;
-    hits.forEach(({ b, dist }) => { const w = 1 / (dist * dist + 0.01); wLat += b.lat * w; wLon += b.lon * w; wS += w; });
-    const acc = hits.length === 1 ? hits[0].dist * 1.5 : hits[0].dist;
-    return { lat: wLat / wS, lon: wLon / wS, acc: Math.max(3, acc), src: 'ble-beacon' };
+    const est = known.map(b => {
+      const bc = beacons[b.id], tx = bc.tx ?? b.tx ?? -59;
+      return { lat: bc.lat, lon: bc.lon, d: Math.max(0.5, Math.pow(10, (tx - b.rssi) / 22)) };
+    });
+    if (est.length === 1) return est[0].d < 8 ? { lat: est[0].lat, lon: est[0].lon, acc: Math.max(4, est[0].d * 1.5), src: "BLE beacon" } : null;
+    let wsum = 0, lat = 0, lon = 0;
+    for (const e of est) { const w = 1 / (e.d * e.d); wsum += w; lat += w * e.lat; lon += w * e.lon; }
+    return { lat: lat / wsum, lon: lon / wsum, acc: Math.max(4, Math.min(...est.map(e => e.d)) * 1.5), src: "BLE beacons" };
   }
 
-  async function onlineLocate(wifi, ble) {
-    const aps = filterWifi(wifi);
-    if (aps.length < MIN_WIFI) { statusMsg = 'Liian vähän Wi-Fi-tukiasemia (' + aps.length + ')'; log(statusMsg); return null; }
-    const wPay = aps.map(ap => ({
-      macAddress: ap.bssid,
-      signalStrength: ap.level ?? ap.rssi,
-      channel: ap.frequency ? Math.round((ap.frequency - 2407) / 5) : undefined,
-    }));
-    const bPay = filterBle(ble).filter(d => isMac(d.id))
-      .map(d => ({ macAddress: d.id, signalStrength: Math.round(d.rssi) }));
-    const endpoints = [];
-    if (GOOGLE_URL) endpoints.push({ name: 'Google', url: GOOGLE_URL,
-      body: { considerIp: false, wifiAccessPoints: wPay, ...(bPay.length ? { bluetoothDevices: bPay } : {}) } });
-    endpoints.push({ name: 'BeaconDB', url: BEACONDB_URL,
-      body: { considerIp: false, wifiAccessPoints: wPay, ...(bPay.length ? { bluetoothBeacons: bPay } : {}) } });
-    for (const ep of endpoints) {
-      try {
-        log('Online: ' + ep.name + ' (' + wPay.length + ' AP)');
-        const res = await fetch(ep.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ep.body),
-        });
-        if (!res.ok) { statusMsg = ep.name + ': HTTP ' + res.status + (res.status === 404 ? ' (ei dataa tältä alueelta)' : ''); log(statusMsg); continue; }
-        const data = await res.json();
-        if (data?.location?.lat == null) { statusMsg = ep.name + ': ei koordinaatteja'; log(statusMsg); continue; }
-        const result = { lat: data.location.lat, lon: data.location.lng, acc: Math.max(15, data.accuracy ?? 100), src: ep.name };
-        statusMsg = ep.name + ': ±' + Math.round(result.acc) + 'm';
-        log(statusMsg + ' ' + result.lat.toFixed(5) + ', ' + result.lon.toFixed(5));
-        return result;
-      } catch (e) { statusMsg = ep.name + ': verkkovirhe ' + e.message; log(statusMsg); }
-    }
-    return null;
+  /* --- 3. Online database (BeaconDB, Mozilla Location Service format). Needs internet and
+         crowd-sourced coverage; typical accuracy tens to hundreds of metres. --- */
+  let lastOnline = "";
+  async function locateOnline(sc) {
+    if (sc.wifi.length < 2) { lastOnline = "Too few Wi-Fi for lookup"; return null; }
+    if (navigator.onLine === false) { lastOnline = "No internet"; return null; }
+    const body = { considerIp: false, wifiAccessPoints: sc.wifi.slice(0, 25).map(w => ({ macAddress: w.bssid, signalStrength: w.rssi, frequency: w.freq })) };
+    if (sc.ble.length) body.bluetoothBeacons = sc.ble.slice(0, 15).filter(b => /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(b.id)).map(b => ({ macAddress: b.id, signalStrength: b.rssi }));
+    try {
+      const r = await fetch("https://api.beacondb.net/v1/geolocate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) { lastOnline = r.status === 404 ? "BeaconDB: area not in database" : `BeaconDB: HTTP ${r.status}`; return null; }
+      const j = await r.json();
+      lastOnline = "BeaconDB: ok";
+      return j && j.location ? { lat: j.location.lat, lon: j.location.lng, acc: Math.max(15, j.accuracy || 100), src: "Wi-Fi database (BeaconDB)" } : null;
+    } catch (e) { lastOnline = "BeaconDB unreachable: " + (e && e.message || e); return null; }
   }
 
-  const W = {
-    available() { return plugin !== null; },
+  async function locate(sc) {
+    const local = locateFingerprint(sc) || locateBeacons(sc);
+    if (local && local.acc <= 25) return local;
+    const online = await locateOnline(sc);
+    return [local, online].filter(Boolean).sort((a, b) => a.acc - b.acc)[0] || null;
+  }
 
-    async prepare() {
-      if (!plugin) return;
-      try {
-        if (plugin.requestAllPermissions) await plugin.requestAllPermissions();
-        log('Luvat pyydetty');
-      } catch (e) { log('prepare-virhe: ' + e.message); }
-    },
+  function learn(lat, lon, sc) {
+    const s = { ...toMap(sc.wifi, "bssid"), ...Object.fromEntries(sc.ble.map(x => ["ble:" + x.id, x.rssi])) };
+    if (Object.keys(s).length < 3) return false;
+    fingerprints.push({ lat, lon, t: Date.now(), s });
+    save(FP_KEY, fingerprints);
+    return true;
+  }
+  const exportDb = () => ({ fingerprints, beacons });
+  function importDb(obj) {
+    if (Array.isArray(obj.fingerprints)) { fingerprints = fingerprints.concat(obj.fingerprints); save(FP_KEY, fingerprints); }
+    if (obj.beacons && typeof obj.beacons === "object") { beacons = { ...beacons, ...obj.beacons }; try { localStorage.setItem(BEACON_KEY, JSON.stringify(beacons)); } catch { /* ignore */ } }
+  }
 
-    async scan() {
-      if (!plugin) return { wifi: [], ble: [], errors: ['ei pluginia'], throttled: false };
-      const [wRes, bRes] = await Promise.allSettled([
-        plugin.scanWifi(),
-        plugin.scanBle({ duration: BLE_SCAN_MS }),
-      ]);
-      const errors = [];
-      let wifi = [], ble = [];
-      if (wRes.status === 'fulfilled') wifi = toArray(wRes.value, 'accessPoints', 'results', 'aps', 'wifi');
-      else errors.push('wifi: ' + (wRes.reason?.message || wRes.reason));
-      if (bRes.status === 'fulfilled') ble = toArray(bRes.value, 'devices', 'results', 'ble', 'beacons');
-      else errors.push('ble: ' + (bRes.reason?.message || bRes.reason));
-      log('Skannaus: ' + wifi.length + ' Wi-Fi, ' + ble.length + ' BLE' + (errors.length ? ' | ' + errors.join('; ') : ''));
-      return { wifi, ble, errors, throttled: !!(wRes.value && wRes.value.throttled) };
-    },
-
-    async locate(scanResult) {
-      const wifi = scanResult?.wifi ?? [];
-      const ble  = scanResult?.ble ?? [];
-      const [fp, bl] = await Promise.all([fingerprintLocate(wifi, ble), beaconLocate(ble)]);
-      const local = (fp && bl) ? (fp.acc <= bl.acc ? fp : bl) : (fp || bl || null);
-      if (local && local.acc <= LOCAL_ACC_THR) { statusMsg = local.src + ': ±' + Math.round(local.acc) + 'm'; return local; }
-      const online = await onlineLocate(wifi, ble);
-      if (!online) return local;
-      if (!local) return online;
-      return online.acc <= local.acc ? online : local;
-    },
-
-    online() { return statusMsg; },
-
-    async learn(lat, lon) {
-      if (!plugin || lat == null || lon == null) return;
-      const s = await W.scan();
-      const signals = buildSignalMap(s.wifi, s.ble);
-      if (!Object.keys(signals).length) { alert('Ei signaaleja. Laita Wi-Fi ja Bluetooth päälle.'); return; }
-      await dbPut('fingerprints', { lat, lon, signals, ts: Date.now() });
-      const all = await dbAll('fingerprints');
-      alert('Tallennettu! Sormenjälkiä yhteensä: ' + all.length);
-    },
-
-    async counts() {
-      const [f, b] = await Promise.all([dbAll('fingerprints'), dbAll('beacons')]);
-      return { fingerprints: f.length, beacons: b.length };
-    },
-
-    async exportDb() {
-      const [f, b] = await Promise.all([dbAll('fingerprints'), dbAll('beacons')]);
-      const blob = new Blob([JSON.stringify({ fingerprints: f, beacons: b }, null, 2)], { type: 'application/json' });
-      const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(blob),
-        download: 'poma-wireless-' + new Date().toISOString().slice(0, 10) + '.json',
-      });
-      a.click(); URL.revokeObjectURL(a.href);
-    },
-
-    async importDb(file) {
-      const data = JSON.parse(await file.text());
-      if (data.fingerprints) { await dbClear('fingerprints'); for (const x of data.fingerprints) await dbPut('fingerprints', x); }
-      if (data.beacons) { await dbClear('beacons'); for (const x of data.beacons) await dbPut('beacons', x); }
-      const c = await W.counts();
-      alert('Tuotu: ' + c.fingerprints + ' sormenjälkeä, ' + c.beacons + ' majakkaa');
-    },
-  };
-
-  // Julkaistaan heti, jotta script.js löytää moduulin
-  window.PomaWireless = W;
-
-  // Plugin haetaan heti (synkronisesti)
-  try {
-    if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
-      plugin = window.Capacitor.registerPlugin('PomaSensors');
-      log('PomaSensors-plugin löytyi');
-    } else {
-      log('Ei natiivialustaa: toimii vain Android-sovelluksessa');
-    }
-  } catch (e) { log('Plugin-virhe: ' + e.message); }
-
-  // Luvat pyydetään kun sivu on valmis
-  function start() { if (plugin) W.prepare(); }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
-  else start();
+  window.PomaWireless = { available, prepare, scan, locate, learn, exportDb, importDb,
+    online: () => lastOnline, counts: () => ({ fingerprints: fingerprints.length, beacons: Object.keys(beacons).length }) };
 })();
