@@ -1,0 +1,67 @@
+
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poma Pathfinder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>◈ Poma <span>Pathfinder</span></h1>
+    <p id="connection">● Offline mode · Demo</p>
+  </header>
+
+  <main>
+    <section class="map-panel">
+      <h2>Navigation</h2>
+      <div id="map">
+        <div class="road road-one"></div>
+        <div class="road road-two"></div>
+        <div class="road road-three"></div>
+        <div id="marker">●</div>
+        <div id="uncertainty"></div>
+        <span class="map-label">DEMO MAP</span>
+      </div>
+
+      <div class="stats">
+        <div>
+          <small>ESTIMATED POSITION</small>
+          <p id="position">Not established</p>
+        </div>
+        <div>
+          <small>DISTANCE</small>
+          <p id="distance">0 m</p>
+        </div>
+        <div>
+          <small>HEADING</small>
+          <p id="heading">N · 0°</p>
+        </div>
+      </div>
+
+      <button id="start">Start demo</button>
+      <button id="move">Simulate movement</button>
+      <button id="reset">Reset</button>
+    </section>
+
+    <section class="assistant">
+      <h2>Poma Assistant</h2>
+      <p class="muted">Offline navigation assistant · Demo</p>
+      <div id="messages">
+        <p class="message">Hello! I can help you understand navigation without GPS. This is a demo, not a real AI.</p>
+      </div>
+      <form id="chat-form">
+        <input id="question" placeholder="Ask Poma..." autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <footer>
+    Demo data only. No real location or emergency connection.
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
