@@ -1,11 +1,14 @@
 <uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<!-- Wi-Fi scan results and mobile cell info are gated behind location permission by Android.
+     The app only reads radio data; it never requests GPS fixes. -->
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<!-- Wi-Fi scan results are used to derive location, so NEARBY_WIFI_DEVICES is not declared with neverForLocation; ACCESS_FINE_LOCATION covers scanning. -->
 <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-<!-- No neverForLocation here: it filters out beacons, which we need for positioning -->
+<!-- No neverForLocation flag: it would filter out the beacons we need -->
 <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+<uses-feature android:name="android.hardware.telephony" android:required="false" />

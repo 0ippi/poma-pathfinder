@@ -1,293 +1,187 @@
-/**
- * Poma Pathfinder – wireless.js  (korjattu versio)
- *
- * Rajapinta (sama kuin script.js odottaa):
- *   PomaWireless.available()        → bool
- *   PomaWireless.prepare()          → Promise  (pyytää luvat)
- *   PomaWireless.scan()             → Promise<scanResult>
- *   PomaWireless.locate(scanResult) → Promise<{lat,lon,acc,src}|null>
- *   PomaWireless.online()           → string (viimeisin tilaviesti)
- *   PomaWireless.learn(lat, lon)    → Promise (tallenna sormenjälki)
- *   PomaWireless.counts()           → Promise<{fingerprints,beacons}>
- *   PomaWireless.exportDb()         → Promise
- *   PomaWireless.importDb(file)     → Promise
- */
-
+/* Poma Pathfinder – app: map, sensors and buttons. Positioning logic lives in wireless.js. */
 (function () {
-  'use strict';
+  "use strict";
+  const E = window.PomaEngine;
+  const $ = id => document.getElementById(id);
+  const tracker = E.createTracker();
+  const stepper = E.createStepDetector();
+  const S = tracker.state;
 
-  const BEACONDB_URL  = 'https://beacondb.net/v1/geolocate';
-  const GOOGLE_URL    = '';
-  const BLE_SCAN_MS   = 3500;
-  const MIN_WIFI      = 2;
-  const MIN_RSSI      = -90;
-  const MAX_AGE_MS    = 20000;
-  const LOCAL_ACC_THR = 25;
-  const FP_K          = 3;
-  const FP_MAX_RMS    = 15;
+  let map, marker, circle, trail, trailPts = [];
+  let heading = null, hv = { s: 0, c: 0, n: 0 };          // smoothed magnetic heading
+  let lastScan = null, busy = false, tracking = false, netTimer = null, wakeLock = null, absSeen = false;
+  const RAD = Math.PI / 180;
 
-  let plugin    = null;
-  let statusMsg = '';
-  let db        = null;
-
-  function openDb() {
-    return new Promise((res, rej) => {
-      const r = indexedDB.open('PomaWireless', 2);
-      r.onupgradeneeded = e => {
-        const d = e.target.result;
-        if (!d.objectStoreNames.contains('fingerprints'))
-          d.createObjectStore('fingerprints', { keyPath: 'id', autoIncrement: true });
-        if (!d.objectStoreNames.contains('beacons'))
-          d.createObjectStore('beacons', { keyPath: 'id' });
-      };
-      r.onsuccess = e => res(e.target.result);
-      r.onerror   = e => rej(e.target.error);
-    });
-  }
-
-  function dbAll(store) {
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readonly').objectStore(store).getAll();
-      r.onsuccess = () => res(r.result);
-      r.onerror   = () => rej(r.error);
-    });
-  }
-
-  function dbPut(store, item) {
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readwrite').objectStore(store).put(item);
-      r.onsuccess = () => res(r.result);
-      r.onerror   = () => rej(r.error);
-    });
-  }
-
-  function dbClear(store) {
-    return new Promise((res, rej) => {
-      const r = db.transaction(store, 'readwrite').objectStore(store).clear();
-      r.onsuccess = () => res();
-      r.onerror   = () => rej(r.error);
-    });
-  }
-
-  function filterWifi(aps) {
-    return (aps || []).filter(ap => {
-      if (!ap.bssid) return false;
-      if ((ap.level ?? ap.rssi ?? -999) < MIN_RSSI) return false;
-      if (ap.age != null && ap.age > MAX_AGE_MS) return false;
-      if ((parseInt((ap.bssid).split(':')[0], 16) & 0x02) !== 0) return false;
-      if ((ap.ssid || '').endsWith('_nomap')) return false;
-      return true;
-    }).slice(0, 25);
-  }
-
-  function filterBle(devs) {
-    return (devs || []).filter(d => (d.rssi ?? -999) > -100).slice(0, 15);
-  }
-
-  function isMac(s) {
-    return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(s);
-  }
-
-  function buildSignalMap(wifi, ble) {
-    const m = {};
-    for (const ap of filterWifi(wifi)) m[ap.bssid]       = ap.level ?? ap.rssi;
-    for (const d  of filterBle(ble))  m['ble:' + d.id]  = d.rssi;
-    return m;
-  }
-
+  /* ---------------------------------------------------------------- log (visible in the app) */
+  const lines = [];
   function log(msg) {
-    console.log('[PomaWireless ' + new Date().toTimeString().slice(0,8) + '] ' + msg);
-    const el = document.getElementById('wireless-log');
-    if (el) el.textContent = msg;
+    const t = new Date().toTimeString().slice(0, 8);
+    lines.push(t + "  " + msg);
+    if (lines.length > 120) lines.shift();
+    const el = $("log");
+    if (el) { el.textContent = lines.join("\n"); el.scrollTop = el.scrollHeight; }
+    console.log("[Poma] " + msg);
+  }
+  function copyLog() {
+    const ta = document.createElement("textarea");
+    ta.value = lines.join("\n"); document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
+    ta.remove(); log(ok ? "Loki kopioitu leikepöydälle" : "Kopiointi ei onnistunut, valitse teksti käsin");
   }
 
-  async function fingerprintLocate(wifi, ble) {
-    const prints = await dbAll('fingerprints');
-    if (prints.length < 3) return null;
-    const cur  = buildSignalMap(wifi, ble);
-    const keys = Object.keys(cur);
-    if (keys.length === 0) return null;
-    const scored = prints.map(fp => {
-      const shared = keys.filter(k => fp.signals[k] != null);
-      if (shared.length < 3) return null;
-      const rms = Math.sqrt(shared.reduce((s, k) => {
-        const d = (cur[k] ?? -100) - (fp.signals[k] ?? -100);
-        return s + d * d;
-      }, 0) / shared.length);
-      return { fp, rms };
-    }).filter(Boolean).sort((a, b) => a.rms - b.rms);
-    if (!scored.length || scored[0].rms > FP_MAX_RMS) return null;
-    const top = scored.slice(0, FP_K);
-    let wLat = 0, wLon = 0, wS = 0;
-    top.forEach(({ fp, rms }) => { const w = 1/(rms+1); wLat+=fp.lat*w; wLon+=fp.lon*w; wS+=w; });
-    const lat = wLat/wS, lon = wLon/wS;
-    const spread = top.reduce((mx, {fp}) =>
-      Math.max(mx, Math.hypot((fp.lat-lat)*111320, (fp.lon-lon)*111320*Math.cos(lat*Math.PI/180))), 0);
-    const acc = Math.min(60, Math.max(4, spread + scored[0].rms/2));
-    log('Sormenjälki: osuma → ±' + acc.toFixed(0) + 'm');
-    return { lat, lon, acc, src: 'fingerprint' };
-  }
+  /* ---------------------------------------------------------------- settings */
+  const stepLen = () => Math.min(230, Math.max(100, +$("set-height").value || 175)) * 0.00415;   // metres
+  const declination = () => +$("set-decl").value || 0;
+  const trueHeading = () => heading == null ? null : E.norm360(heading + declination());
 
-  async function beaconLocate(ble) {
-    const known = await dbAll('beacons');
-    if (!known.length) return null;
-    const hits = filterBle(ble).map(d => {
-      const b = known.find(k => k.id === d.id);
-      if (!b) return null;
-      const dist = Math.pow(10, ((b.txPower ?? d.txPower ?? -59) - d.rssi) / 20);
-      return dist > 30 ? null : { b, dist };
-    }).filter(Boolean);
-    if (!hits.length || (hits.length === 1 && hits[0].dist > 8)) return null;
-    let wLat=0,wLon=0,wS=0;
-    hits.forEach(({b,dist}) => { const w=1/(dist*dist+.01); wLat+=b.lat*w; wLon+=b.lon*w; wS+=w; });
-    const acc = hits.length === 1 ? hits[0].dist*1.5 : hits[0].dist;
-    return { lat:wLat/wS, lon:wLon/wS, acc:Math.max(3,acc), src:'ble-beacon' };
+  /* ---------------------------------------------------------------- map */
+  function initMap() {
+    if (!window.L) { $("map").insertAdjacentHTML("beforeend", '<p class="hint" style="padding:24px">Karttaa ei voitu ladata (tarvitsee internetin ensimmäisellä kerralla).</p>'); return; }
+    map = L.map("map", { zoomControl: true }).setView([64.5, 26], 5);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+    trail = L.polyline([], { color: "#4cc9a0", weight: 4 }).addTo(map);
+    map.on("click", e => {
+      tracker.setPosition(e.latlng.lat, e.latlng.lng, 10, "käsin asetettu");
+      log("Lähtöpiste asetettu käsin kartalta");
+      trailPts = []; draw(true);
+    });
   }
-
-  async function onlineLocate(wifi, ble) {
-    const aps = filterWifi(wifi);
-    if (aps.length < MIN_WIFI) { log('Online: liian vähän AP:ja (' + aps.length + ')'); return null; }
-    const wPay = aps.map(ap => ({
-      macAddress:     ap.bssid,
-      signalStrength: ap.level ?? ap.rssi,
-      channel:        ap.frequency ? Math.round((ap.frequency-2407)/5) : undefined,
-    }));
-    const bPay = filterBle(ble).filter(d=>isMac(d.id))
-      .map(d => ({ macAddress:d.id, signalStrength:Math.round(d.rssi) }));
-    const endpoints = [];
-    if (GOOGLE_URL) {
-      endpoints.push({ name:'Google', url:GOOGLE_URL,
-        body:{ considerIp:false, wifiAccessPoints:wPay, ...(bPay.length?{bluetoothDevices:bPay}:{}) }});
+  function draw(recenter) {
+    if (!map || !S.has) return;
+    const ll = [S.lat, S.lon];
+    if (!marker) {
+      marker = L.marker(ll, { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(map);
+      circle = L.circle(ll, { radius: S.sigma, color: "#4cc9a0", weight: 1, fillOpacity: 0.12 }).addTo(map);
     }
-    endpoints.push({ name:'BeaconDB', url:BEACONDB_URL,
-      body:{ considerIp:false, wifiAccessPoints:wPay, ...(bPay.length?{bluetoothBeacons:bPay}:{}) }});
-    for (const ep of endpoints) {
-      try {
-        log('Online: ' + ep.name + ' (' + wPay.length + ' AP)...');
-        const res = await fetch(ep.url, {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(ep.body),
-        });
-        if (!res.ok) { log(ep.name + ': HTTP ' + res.status); continue; }
-        const data = await res.json();
-        if (data?.location?.lat == null) { log(ep.name + ': ei koordinaatteja'); continue; }
-        const result = { lat:data.location.lat, lon:data.location.lng,
-          acc:Math.max(15, data.accuracy??100), src:ep.name };
-        statusMsg = ep.name + ': ±' + Math.round(result.acc) + 'm';
-        log(ep.name + ': ✅ ' + result.lat.toFixed(5) + ', ' + result.lon.toFixed(5) + ' ±' + Math.round(result.acc) + 'm');
-        return result;
-      } catch(e) { log(ep.name + ': ' + e.message); }
+    marker.setLatLng(ll); circle.setLatLng(ll); circle.setRadius(Math.max(3, S.sigma));
+    trailPts.push(ll); if (trailPts.length > 2000) trailPts.shift(); trail.setLatLngs(trailPts);
+    if (recenter) {
+      const z = S.sigma > 3000 ? 12 : S.sigma > 400 ? 14 : S.sigma > 80 ? 16 : 18;
+      map.setView(ll, Math.max(map.getZoom(), z));
     }
-    statusMsg = 'Online-paikannus epäonnistui';
-    return null;
   }
 
-  const W = {
-    available() { return plugin !== null; },
+  /* ---------------------------------------------------------------- stats */
+  const fmtAcc = m => m >= 1000 ? "±" + (m / 1000).toFixed(1) + " km" : "±" + Math.round(m) + " m";
+  function stats() {
+    $("s-pos").textContent = S.has ? S.lat.toFixed(5) + ", " + S.lon.toFixed(5) : "ei vielä";
+    $("s-acc").textContent = S.has ? fmtAcc(S.sigma) : "–";
+    $("s-src").textContent = S.src || "–";
+    $("s-steps").textContent = S.steps + (S.meters ? " (" + Math.round(S.meters) + " m)" : "");
+    const th = trueHeading();
+    $("s-head").textContent = th == null ? "ei kompassia" : Math.round(th) + "°";
+    $("compass-label").textContent = th == null ? "ei suuntaa" : Math.round(th) + "°";
+    $("compass-arrow").style.transform = "rotate(" + (th || 0) + "deg)";
+    if (lastScan) $("s-scan").textContent = lastScan.wifi.length + " / " + lastScan.ble.length + " / " + lastScan.cells.length;
+    $("s-msg").textContent = E.message() || "–";
+    $("s-fp").textContent = E.counts().fingerprints;
+  }
+  function banner(text) { const b = $("banner"); b.hidden = !text; b.textContent = text || ""; }
+  function checkStatus(st) {
+    if (!st) return;
+    $("s-dev").textContent = st.device + " · Android API " + st.sdk;
+    const problems = [];
+    if (!st.locationPermission) problems.push("Anna sovellukselle sijaintilupa (se tarvitaan Wi-Fi- ja mobiiliasemien lukemiseen; GPS:ää ei käytetä).");
+    if (!st.locationServicesOn) problems.push("Laita puhelimen Sijainti-asetus päälle. Android estää muuten Wi-Fi- ja asematiedot kaikilta sovelluksilta. Sovellus ei käytä GPS-satelliitteja.");
+    if (!st.wifiEnabled) problems.push("Laita Wi-Fi päälle (ei tarvitse olla yhdistettynä).");
+    if (!st.hasTelephony) problems.push("Laitteessa ei ole matkapuhelinyhteyttä, solupaikannus ei käytössä.");
+    banner(problems.join(" "));
+  }
 
-    async prepare() {
-      if (!plugin) return;
-      try {
-        const status = await plugin.getStatus();
-        log('Status: ' + JSON.stringify(status));
-        if (!status.wifiPermission || !status.blePermission) {
-          await plugin.requestAllPermissions();
-          log('Luvat pyydetty');
-        }
-      } catch(e) { log('prepare virhe: ' + e.message); }
-    },
-
-    async scan() {
-      if (!plugin) return { wifi:[], ble:[], errors:[], throttled:false };
-      try {
-        log('Skannataan...');
-        const [wRes, bRes] = await Promise.allSettled([
-          plugin.scanWifi(),
-          plugin.scanBle({ duration: BLE_SCAN_MS }),
-        ]);
-        const wifi   = wRes.status==='fulfilled' ? (wRes.value?.accessPoints ?? wRes.value?.results ?? wRes.value ?? []) : [];
-        const ble    = bRes.status==='fulfilled' ? (bRes.value?.devices ?? bRes.value?.results ?? bRes.value ?? []) : [];
-        const errors = [];
-        if (wRes.status==='rejected') { errors.push('wifi: '+wRes.reason); log('Wi-Fi virhe: '+wRes.reason); }
-        if (bRes.status==='rejected') { errors.push('ble: '+bRes.reason);  log('BLE virhe: '+bRes.reason); }
-        log('Skannaus: ' + wifi.length + ' AP, ' + ble.length + ' BLE');
-        return { wifi, ble, errors, throttled: wRes.value?.throttled ?? false };
-      } catch(e) {
-        log('scan virhe: ' + e.message);
-        return { wifi:[], ble:[], errors:[e.message], throttled:false };
-      }
-    },
-
-    async locate(scanResult) {
-      const wifi = scanResult?.wifi ?? [];
-      const ble  = scanResult?.ble  ?? [];
-      const [fp, bl] = await Promise.all([fingerprintLocate(wifi,ble), beaconLocate(ble)]);
-      let local = (fp&&bl)?(fp.acc<=bl.acc?fp:bl):(fp??bl??null);
-      if (local && local.acc <= LOCAL_ACC_THR) { statusMsg=local.src+': ±'+Math.round(local.acc)+'m'; return local; }
-      const online = await onlineLocate(wifi, ble);
-      if (!online&&!local) return null;
-      if (!online) return local;
-      if (!local)  return online;
-      return online.acc<=local.acc?online:local;
-    },
-
-    online() { return statusMsg; },
-
-    async learn(lat, lon) {
-      if (!plugin||!lat||!lon) return;
-      const s = await W.scan();
-      const signals = buildSignalMap(s.wifi, s.ble);
-      if (!Object.keys(signals).length) { alert('Ei signaaleja'); return; }
-      await dbPut('fingerprints', { lat, lon, signals, ts:Date.now() });
-      const all = await dbAll('fingerprints');
-      log('Sormenjälki #' + all.length + ' tallennettu');
-      alert('Tallennettu! Yhteensä: ' + all.length);
-    },
-
-    async counts() {
-      const [fps,beacons] = await Promise.all([dbAll('fingerprints'),dbAll('beacons')]);
-      return { fingerprints:fps.length, beacons:beacons.length };
-    },
-
-    async exportDb() {
-      const [fps,beacons] = await Promise.all([dbAll('fingerprints'),dbAll('beacons')]);
-      const blob = new Blob([JSON.stringify({fingerprints:fps,beacons},null,2)],{type:'application/json'});
-      const a = Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:'poma-wireless-'+new Date().toISOString().slice(0,10)+'.json'});
-      a.click(); URL.revokeObjectURL(a.href);
-    },
-
-    async importDb(file) {
-      const data = JSON.parse(await file.text());
-      if (data.fingerprints) { await dbClear('fingerprints'); for (const fp of data.fingerprints) await dbPut('fingerprints',fp); }
-      if (data.beacons)      { await dbClear('beacons');      for (const b  of data.beacons)      await dbPut('beacons',b); }
-      const c = await W.counts();
-      alert('Tuotu: '+c.fingerprints+' sormenjälkeä, '+c.beacons+' majakka');
-    },
-  };
-
-  async function init() {
-    try { db = await openDb(); } catch(e) { log('IndexedDB virhe: '+e.message); }
+  /* ---------------------------------------------------------------- positioning */
+  async function networkFix(reason) {
+    if (busy) return;
+    if (!E.available()) { banner("Radioskannaus toimii vain Android-sovelluksessa (ei selaimessa)."); log("Ei natiivipluginia, ei selainta varten"); return; }
+    busy = true; $("btn-locate").disabled = true;
     try {
-      if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-        const { PomaSensors } = window.Capacitor.Plugins;
-        if (PomaSensors) {
-          plugin = PomaSensors;
-          log('PomaSensors löytyi ✅');
-          await W.prepare();
-        } else {
-          log('PomaSensors PUUTTUU – tarkista MainActivity.java');
-        }
-      } else {
-        log('Ei natiivialustaa – toimii vain Android-sovelluksessa');
+      log("Haku alkaa (" + reason + ")");
+      const st = await E.prepare(); checkStatus(st);
+      const sc = lastScan = await E.scan();
+      log("Skannaus: " + sc.wifi.length + " Wi-Fi (" + (sc.wifiRaw || 0) + " raakana" + (sc.throttled ? ", Android rajoitti" : "") + "), " +
+          sc.ble.length + " BLE, " + sc.cells.length + " solua" + (sc.errors.length ? " | virheet: " + sc.errors.join("; ") : ""));
+      const fix = await E.locate(sc);
+      if (!fix) { log("Ei sijaintia: " + E.message()); }
+      else {
+        const r = tracker.fuse(fix);
+        log("Sijainti: " + fix.lat.toFixed(5) + ", " + fix.lon.toFixed(5) + " " + fmtAcc(fix.acc) + " (" + fix.src + ")");
+        draw(r === "set");
       }
-    } catch(e) { log('Alustusvirhe: '+e.message); }
-    const c = await W.counts();
-    log('Valmis – '+c.fingerprints+' sormenjälkeä, '+c.beacons+' majakka');
-    window.PomaWireless = W;
+    } catch (e) { log("Virhe: " + errText(e)); }
+    finally { busy = false; $("btn-locate").disabled = false; stats(); }
+  }
+  const errText = e => String((e && (e.message || e.errorMessage)) || e);
+
+  async function learnHere() {
+    if (!S.has) { log("Aseta ensin sijainti: paina karttaa tai Paikanna nyt"); return; }
+    if (!E.available()) { log("Oppiminen toimii vain Android-sovelluksessa"); return; }
+    if (S.sigma > 30 && !confirm("Sijainnin tarkkuus on vain " + fmtAcc(S.sigma) + ". Opittu paikka on yhtä väärä. Napauta ensin karttaa täsmälleen siihen kohtaan, jossa seisot. Tallennetaanko silti?")) return;
+    const sc = (lastScan && Date.now() - lastScan.t < 20000) ? lastScan : (lastScan = await E.scan());
+    const ok = E.learn(S.lat, S.lon, sc);
+    log(ok ? "Paikka opittu (" + E.counts().fingerprints + " yhteensä)" : "Liian vähän signaaleja opittavaksi (tarvitaan vähintään 3)");
+    stats();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
+  /* ---------------------------------------------------------------- sensors and tracking */
+  function onOrientation(ev) {
+    if (ev.type === "deviceorientation" && absSeen) return;
+    if (ev.type === "deviceorientationabsolute") absSeen = true;
+    let h = null;
+    if (typeof ev.webkitCompassHeading === "number") h = ev.webkitCompassHeading;
+    else if (ev.alpha != null && ev.beta != null && ev.gamma != null && (ev.absolute || ev.type === "deviceorientationabsolute"))
+      h = E.headingFromEuler(ev.alpha, ev.beta, ev.gamma);
+    if (h == null) return;
+    hv.s = hv.n ? 0.85 * hv.s + 0.15 * Math.sin(h * RAD) : Math.sin(h * RAD);
+    hv.c = hv.n ? 0.85 * hv.c + 0.15 * Math.cos(h * RAD) : Math.cos(h * RAD);
+    hv.n++;
+    heading = E.norm360(Math.atan2(hv.s, hv.c) / RAD);
   }
+  function onMotion(ev) {
+    const a = ev.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    if (stepper.feed(performance.now(), a.x, a.y, a.z)) {
+      const moved = tracker.step(trueHeading(), stepLen());
+      if (moved) draw(false);
+      stats();
+    }
+  }
+  async function askMotionPermission() {      // only iOS-style WebViews have this
+    try {
+      if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === "function") await DeviceMotionEvent.requestPermission();
+      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === "function") await DeviceOrientationEvent.requestPermission();
+    } catch (e) { log("Liikeanturilupa: " + errText(e)); }
+  }
+  async function startTracking() {
+    await askMotionPermission();
+    window.addEventListener("deviceorientationabsolute", onOrientation, true);
+    window.addEventListener("deviceorientation", onOrientation, true);
+    window.addEventListener("devicemotion", onMotion, true);
+    try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { /* optional */ }
+    tracking = true; $("btn-track").textContent = "Lopeta seuranta";
+    log("Seuranta päällä: askeleet + kompassi, verkkopaikannus 30 s välein");
+    networkFix("seuranta alkoi");
+    netTimer = setInterval(() => networkFix("ajastettu"), 30000);
+  }
+  function stopTracking() {
+    window.removeEventListener("deviceorientationabsolute", onOrientation, true);
+    window.removeEventListener("deviceorientation", onOrientation, true);
+    window.removeEventListener("devicemotion", onMotion, true);
+    clearInterval(netTimer); try { if (wakeLock) wakeLock.release(); } catch (e) { /* ignore */ }
+    tracking = false; $("btn-track").textContent = "Aloita seuranta"; log("Seuranta pysäytetty");
+  }
+
+  /* ---------------------------------------------------------------- start */
+  document.addEventListener("DOMContentLoaded", async () => {
+    initMap();
+    $("btn-locate").addEventListener("click", () => networkFix("käsin"));
+    $("btn-track").addEventListener("click", () => (tracking ? stopTracking() : startTracking()));
+    $("btn-learn").addEventListener("click", learnHere);
+    $("btn-clear").addEventListener("click", () => { trailPts = []; if (trail) trail.setLatLngs([]); S.steps = 0; S.meters = 0; stats(); });
+    $("btn-copylog").addEventListener("click", copyLog);
+    setInterval(stats, 1500);
+    log("Käynnistetty. Natiiviplugin: " + (E.available() ? "löytyi" : "ei (selain)"));
+    if (E.available()) {
+      try { checkStatus(await E.status()); } catch (e) { log("Tilan luku epäonnistui: " + errText(e)); }
+    } else banner("Radioskannaus toimii vain Android-sovelluksessa. Selaimessa näet vain kartan.");
+    stats();
+  });
 })();
