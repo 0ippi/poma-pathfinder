@@ -7,22 +7,23 @@
   <meta name="theme-color" content="#0b1220">
   <title>Poma Pathfinder</title>
 
-  <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script src="script.js" defer></script>
+  <script src="script.js?v=4" defer></script>
 </head>
 
 <body>
   <header>
     <h1>◈ Poma <span>Pathfinder</span></h1>
-    <p id="connection">● GPS not connected</p>
+    <p id="connection">● Paikannusta ei ole käynnistetty</p>
   </header>
 
   <main>
     <section class="panel">
       <h2>Live Navigation</h2>
-      <p class="muted">Your phone's reported location</p>
+      <p class="muted">Puhelimen ilmoittama sijainti ja katselusuunta</p>
 
       <div id="map">
         <div id="compass" aria-label="Puhelimen suunta">
@@ -31,41 +32,71 @@
         </div>
       </div>
 
-      <p id="map-status" role="status">Kartta latautuu...</p>
+      <p id="map-status" role="status">Ladataan karttaa...</p>
 
       <button id="enable-gps">Find my location</button>
       <button id="follow-gps" class="secondary">Start live tracking</button>
       <button id="stop-gps" class="secondary">Stop tracking</button>
 
       <div class="stats">
-        <div><small>LATITUDE</small><p id="gps-lat">—</p></div>
-        <div><small>LONGITUDE</small><p id="gps-lon">—</p></div>
-        <div><small>ACCURACY</small><p id="gps-accuracy">—</p></div>
+        <div>
+          <small>LATITUDE</small>
+          <p id="gps-lat">—</p>
+        </div>
+        <div>
+          <small>LONGITUDE</small>
+          <p id="gps-lon">—</p>
+        </div>
+        <div>
+          <small>ACCURACY</small>
+          <p id="gps-accuracy">—</p>
+        </div>
       </div>
 
       <h2>Phone Sensors</h2>
       <div class="stats">
-        <div><small>ORIENTATION</small><p id="real-heading">Not enabled</p></div>
-        <div><small>MOTION</small><p id="real-motion">Not enabled</p></div>
+        <div>
+          <small>COMPASS</small>
+          <p id="real-heading">Not enabled</p>
+        </div>
+        <div>
+          <small>MOTION</small>
+          <p id="real-motion">Not enabled</p>
+        </div>
       </div>
 
       <button id="enable-sensors">Enable phone sensors</button>
-      <p id="sensor-status" role="status">Sensors not enabled.</p>
+      <p id="sensor-status" role="status">Sensorit eivät ole käytössä.</p>
     </section>
 
     <section class="panel">
-      <h2>Demo Navigation</h2>
-      <p class="muted">Simulated movement only — not your real GPS track.</p>
+      <h2>Alternative Positioning</h2>
+      <p class="muted">
+        Wi-Fi- ja Bluetooth-tuen tila
+      </p>
 
-      <div class="stats">
-        <div><small>DEMO POSITION</small><p id="position">Not started</p></div>
-        <div><small>DISTANCE</small><p id="distance">0 m</p></div>
-        <div><small>HEADING</small><p id="heading">N · 0°</p></div>
+      <div class="status-card">
+        <h3>Wi-Fi positioning</h3>
+        <p id="wifi-status">
+          Selain ei voi skannata Wi-Fi-verkkoja suoraan.
+        </p>
       </div>
 
-      <button id="start">Start demo</button>
-      <button id="move">Simulate movement</button>
-      <button id="reset" class="secondary">Reset demo</button>
+      <div class="status-card">
+        <h3>Bluetooth positioning</h3>
+        <p id="bluetooth-status">
+          Selain ei voi seurata lähellä olevia Bluetooth-laitteita taustalla.
+        </p>
+      </div>
+
+      <button id="check-alternatives" class="secondary">
+        Check positioning options
+      </button>
+
+      <p class="muted" id="alternative-info" role="status">
+        Puhelimen käyttöjärjestelmä voi jo käyttää Wi-Fiä ja muita signaaleja
+        tavallisen paikannuksen apuna.
+      </p>
     </section>
 
     <section class="panel assistant">
@@ -73,19 +104,28 @@
       <p class="muted">Offline rule-based demo assistant</p>
 
       <div id="messages" aria-live="polite">
-        <p class="message">Hello! I'm Poma. I can explain GPS, sensors and offline navigation. This demo is not a real AI.</p>
+        <p class="message">
+          Hello! I'm Poma. I can explain GPS, sensors and offline navigation.
+          This demo is not a real AI.
+        </p>
       </div>
 
       <form id="chat-form">
-        <input id="question" placeholder="Ask Poma..." autocomplete="off" aria-label="Ask Poma">
+        <input
+          id="question"
+          placeholder="Ask Poma..."
+          autocomplete="off"
+          aria-label="Ask Poma"
+        >
         <button type="submit">Send</button>
       </form>
     </section>
   </main>
 
   <footer>
-    GPS and sensor readings depend on device support and permissions.
-    Map tiles require internet. No emergency connection.
+    Paikannus ja sensorit riippuvat laitteen ja selaimen tuesta.
+    Kartta tarvitsee internetyhteyden.
+    Ei hätäpalveluyhteyttä.
     <br>
     Map data © OpenStreetMap contributors.
   </footer>

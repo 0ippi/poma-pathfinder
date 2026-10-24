@@ -16,7 +16,7 @@ let gpsWatchId = null;
 function initializeMap() {
   if (typeof L === "undefined") {
     mapStatus.textContent =
-      "Karttakirjastoa ei saatu ladattua. Tarkista internetyhteys.";
+      "Karttakirjasto ei latautunut. Tarkista internetyhteys.";
     return;
   }
 
@@ -25,14 +25,13 @@ function initializeMap() {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
   mapStatus.textContent =
-    "Kartta valmis. Paina Find my location paikantaaksesi itsesi.";
+    "Kartta valmis. Paina Find my location.";
 
-  // Varmistaa kartan oikean koon myös mobiiliselaimissa.
-  setTimeout(() => map.invalidateSize(), 100);
+  requestAnimationFrame(() => map.invalidateSize());
 }
 
 function showLocation(position) {
@@ -44,7 +43,7 @@ function showLocation(position) {
   $("gps-accuracy").textContent = `±${Math.round(accuracy)} m`;
 
   if (!map) {
-    mapStatus.textContent = "Sijainti saatiin, mutta kartta ei ole käytettävissä.";
+    mapStatus.textContent = "Sijainti saatiin, mutta kartta ei ole valmis.";
     return;
   }
 
@@ -57,7 +56,7 @@ function showLocation(position) {
       fillOpacity: 1
     }).addTo(map);
 
-    userMarker.bindPopup("Sijaintisi");
+    userMarker.bindPopup("Puhelimen ilmoittama sijainti");
 
     accuracyCircle = L.circle(point, {
       radius: accuracy,
@@ -74,9 +73,8 @@ function showLocation(position) {
 
   map.setView(point, 16);
   mapStatus.textContent =
-    `Sijainti päivitetty. Tarkkuus noin ${Math.round(accuracy)} m.`;
-
-  connection.textContent = "● Location available";
+    `Sijainti päivitetty. Ilmoitettu tarkkuus noin ${Math.round(accuracy)} m.`;
+  connection.textContent = "● Sijainti saatavilla";
 }
 
 function showLocationError(error) {
@@ -88,8 +86,7 @@ function showLocationError(error) {
 
   mapStatus.textContent =
     messages[error.code] || "Sijainnin hakeminen epäonnistui.";
-
-  connection.textContent = "● Location unavailable";
+  connection.textContent = "● Sijainti ei saatavilla";
 }
 
 function requestLocation() {
@@ -120,7 +117,8 @@ $("enable-gps").addEventListener("click", requestLocation);
 
 $("follow-gps").addEventListener("click", () => {
   if (!window.isSecureContext || !navigator.geolocation) {
-    mapStatus.textContent = "Jatkuva paikannus vaatii HTTPS-yhteyden.";
+    mapStatus.textContent =
+      "Jatkuva paikannus vaatii HTTPS-yhteyden ja selaimen tuen.";
     return;
   }
 
@@ -158,13 +156,12 @@ $("stop-gps").addEventListener("click", () => {
 let sensorsStarted = false;
 
 function getCompassHeading(event) {
-  // iOS Safari voi tarjota suoraan kompassisuunnan.
+  // iOS Safari voi antaa suoran kompassisuunnan.
   if (typeof event.webkitCompassHeading === "number") {
     return event.webkitCompassHeading;
   }
 
-  // Muissa selaimissa alpha on laiteasennon kulma,
-  // eikä se kaikissa laitteissa vastaa kompassisuuntaa.
+  // Tämä on arvio, ei taattu kompassisuunta kaikissa laitteissa.
   if (typeof event.alpha === "number") {
     return (360 - event.alpha) % 360;
   }
@@ -206,9 +203,9 @@ $("enable-sensors").addEventListener("click", async () => {
       throw new Error("Selain ei tue suunta-anturia.");
     }
 
-    // iOS Safari vaatii käyttäjän luvan.
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const permission = await DeviceOrientationEvent.requestPermission();
+      const permission =
+        await DeviceOrientationEvent.requestPermission();
 
       if (permission !== "granted") {
         throw new Error("Suunta-anturin käyttöoikeus evättiin.");
@@ -238,40 +235,19 @@ $("enable-sensors").addEventListener("click", async () => {
 });
 
 // --------------------
-// SIMULATED NAVIGATION
+// WI-FI AND BLUETOOTH INFORMATION
 // --------------------
 
-let demoDistance = 0;
-let demoHeading = 0;
+$("check-alternatives").addEventListener("click", () => {
+  $("wifi-status").textContent =
+    "Tavallinen verkkosivu ei voi skannata ympäristön Wi-Fi-verkkoja tai lukea niiden signaalivahvuuksia suoraan.";
 
-function compassLabel(degrees) {
-  return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][
-    Math.round(degrees / 45) % 8
-  ];
-}
+  $("bluetooth-status").textContent =
+    "Web Bluetooth ei tue taustalla tehtävää ympäristön skannausta, eikä sitä tueta kaikissa selaimissa.";
 
-function updateDemo() {
-  $("position").textContent = "Simulated position";
-  $("distance").textContent = `${demoDistance} m`;
-  $("heading").textContent =
-    `${compassLabel(demoHeading)} · ${demoHeading}°`;
-}
-
-function resetDemo() {
-  demoDistance = 0;
-  demoHeading = 0;
-  updateDemo();
-}
-
-$("start").addEventListener("click", resetDemo);
-
-$("move").addEventListener("click", () => {
-  demoDistance += 10;
-  demoHeading = (demoHeading + 45) % 360;
-  updateDemo();
+  $("alternative-info").textContent =
+    "Find my location käyttää selaimen paikannuspalvelua. Puhelimen käyttöjärjestelmä voi yhdistää GPS:n, Wi-Fin, mobiiliverkon ja muut lähteet automaattisesti. Erillinen Wi-Fi/Bluetooth-paikannus vaatii tuetun natiivisovelluksen tai ulkoisen laitteiston.";
 });
-
-$("reset").addEventListener("click", resetDemo);
 
 // --------------------
 // SIMPLE OFFLINE ASSISTANT
@@ -292,18 +268,21 @@ chatForm.addEventListener("submit", (event) => {
   const q = question.toLowerCase();
   let answer;
 
-  if (q.includes("gps") || q.includes("location")) {
+  if (q.includes("gps") || q.includes("location") || q.includes("paikannus")) {
     answer =
-      "Poma näyttää puhelimen ilmoittaman sijainnin. Tarkkuus riippuu saatavilla olevista signaaleista.";
+      "Poma näyttää selaimen ilmoittaman sijainnin. Puhelimen käyttöjärjestelmä voi käyttää GPS:ää, Wi-Fiä ja mobiiliverkkoa sijainnin arvioimiseen.";
   } else if (q.includes("wifi")) {
     answer =
-      "Android voi käyttää Wi-Fi-verkkoja paikannuksen apuna, mutta verkkosivu ei voi suoraan skannata lähellä olevia Wi-Fi-verkkoja.";
+      "Verkkosivu ei voi suoraan skannata Wi-Fi-verkkoja. Erillinen Wi-Fi-paikannus tarvitsee natiivisovelluksen tai ulkoisen palvelun.";
+  } else if (q.includes("bluetooth")) {
+    answer =
+      "Bluetooth-majakoita voidaan käyttää sisäpaikannukseen, mutta tavallinen verkkosivu ei voi skannata niitä jatkuvasti taustalla.";
   } else if (q.includes("compass") || q.includes("heading") || q.includes("suunta")) {
     answer =
-      "Kompassi käyttää puhelimen suunta-anturia. Lukema voi olla epätarkka tai kalibroimaton.";
+      "Kompassi käyttää puhelimen suunta-anturia. Lukema voi olla epätarkka ja vaatia kalibrointia.";
   } else if (q.includes("offline")) {
     answer =
-      "Sovellus voi toimia osittain ilman yhteyttä, mutta karttalaatat tarvitsevat internetin, ellei niitä tallenneta erikseen.";
+      "Sovelluksen käyttöliittymä voi toimia offline-tilassa, mutta kartta tarvitsee tallennetut karttatiedot tai internetyhteyden.";
   } else {
     answer =
       "Olen Poman esittelyavustaja. Käytän valmiita vastauksia enkä ole yhteydessä oikeaan tekoälyyn.";
@@ -321,4 +300,3 @@ function addMessage(text) {
 }
 
 initializeMap();
-updateDemo();
