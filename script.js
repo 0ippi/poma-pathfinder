@@ -105,3 +105,47 @@ function addMessage(text, isUser) {
 }
 
 updateDisplay();
+
+
+const enableButton = document.getElementById("enable-sensors");
+const realHeading = document.getElementById("real-heading");
+const realMotion = document.getElementById("real-motion");
+const sensorStatus = document.getElementById("sensor-status");
+
+enableButton.addEventListener("click", async () => {
+  try {
+    if (typeof DeviceOrientationEvent === "undefined") {
+      sensorStatus.textContent = "Compass sensor unavailable.";
+      return;
+    }
+
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      const permission = await DeviceOrientationEvent.requestPermission();
+
+      if (permission !== "granted") {
+        sensorStatus.textContent = "Sensor permission denied.";
+        return;
+      }
+    }
+
+    window.addEventListener("deviceorientation", (event) => {
+      if (event.alpha !== null) {
+        realHeading.textContent = `${Math.round(event.alpha)}° (raw)`;
+      }
+    });
+
+    window.addEventListener("devicemotion", (event) => {
+      const a = event.accelerationIncludingGravity;
+
+      if (a && a.x !== null && a.y !== null && a.z !== null) {
+        realMotion.textContent =
+          `X ${a.x.toFixed(1)} · Y ${a.y.toFixed(1)} · Z ${a.z.toFixed(1)}`;
+      }
+    });
+
+    sensorStatus.textContent = "Sensor access requested.";
+  } catch (error) {
+    sensorStatus.textContent =
+      "Sensors unavailable. Check browser permissions and HTTPS.";
+  }
+});
