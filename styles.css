@@ -224,3 +224,14 @@ footer {
     height: 300px;
   }
 }
+
+/* v6 additions */
+select { width:100%; padding:12px; color:var(--text); background:#0f1920; border:1px solid var(--border); border-radius:9px; font:inherit; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.hint { color:var(--muted); font-size:.8rem; margin:6px 0 0; }
+.log { margin:12px 0 0; padding:10px; max-height:140px; overflow:auto; background:#0f1920; border-radius:9px; font:.75rem/1.4 ui-monospace,monospace; color:var(--muted); white-space:pre-wrap; }
+.warn { color:#ffd479; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+.pulse { animation:pulse .25s ease-out; }
+@keyframes pulse { from { color:var(--accent); } to { color:var(--text); } }
+@media (prefers-reduced-motion:reduce) { .pulse { animation:none; } }

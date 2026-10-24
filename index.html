@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="fi">
 <head>
@@ -6,147 +5,117 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101820">
   <title>Poma Pathfinder</title>
-
-  <link rel="stylesheet" href="styles.css?v=5">
-  <link rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-          defer></script>
-  <script src="script.js?v=5" defer></script>
+  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="script.js?v=6" defer></script>
 </head>
-
 <body>
   <header class="topbar">
     <div>
       <p class="eyebrow">GPS-FREE NAVIGATION</p>
       <h1>Poma Pathfinder</h1>
     </div>
-    <span class="pill">Prototype</span>
+    <span class="pill">Prototype v6</span>
   </header>
 
   <main class="layout">
     <section class="card">
       <h2>Map</h2>
-      <p class="muted">The map requires an internet connection.</p>
-
+      <p class="muted">Tap the map to set your starting point. Tiles need internet; tracking does not.</p>
       <div id="map">
         <div id="compass">
           <div id="compass-arrow">↑</div>
           <span id="compass-label">No heading</span>
         </div>
       </div>
-
-      <p id="map-note" class="note">
-        No verified GPS-free position is available yet.
-      </p>
+      <button id="center-map">Center map</button>
+      <p id="map-note" class="note">No reference point yet.</p>
     </section>
 
     <section class="card">
-      <h2>GPS-Free Positioning</h2>
+      <h2>Dead-reckoning position</h2>
       <p class="muted">
-        Set a known starting point. Sensors alone cannot determine
-        your initial coordinates.
+        Set a known start. Steps are detected from the accelerometer and
+        combined with compass heading. Error grows with distance.
       </p>
 
       <div class="stats">
-        <div class="stat">
-          <span>Position status</span>
-          <strong id="position-status">No reference point</strong>
+        <div class="stat"><span>Position status</span><strong id="position-status">No reference point</strong></div>
+        <div class="stat"><span>Heading</span><strong id="heading-value">Unknown</strong></div>
+        <div class="stat"><span>Steps</span><strong id="steps-value">0</strong></div>
+        <div class="stat"><span>Distance</span><strong id="distance-value">0 m</strong></div>
+        <div class="stat"><span>Movement</span><strong id="motion-value">Not detected</strong></div>
+        <div class="stat"><span>Est. error</span><strong id="accuracy-value">Unknown</strong></div>
+        <div class="stat"><span>Current position</span><strong id="pos-value">–</strong></div>
+        <div class="stat"><span>Last step</span><strong id="last-step">–</strong></div>
+      </div>
+
+      <div class="row2">
+        <div>
+          <label for="start-lat">Starting latitude</label>
+          <input id="start-lat" type="number" step="any" placeholder="e.g. 61.4981">
         </div>
-        <div class="stat">
-          <span>Heading</span>
-          <strong id="heading-value">Unknown</strong>
-        </div>
-        <div class="stat">
-          <span>Movement</span>
-          <strong id="motion-value">Not detected</strong>
-        </div>
-        <div class="stat">
-          <span>Accuracy</span>
-          <strong id="accuracy-value">Unknown</strong>
+        <div>
+          <label for="start-lon">Starting longitude</label>
+          <input id="start-lon" type="number" step="any" placeholder="e.g. 23.7600">
         </div>
       </div>
 
-      <label for="start-lat">Starting latitude</label>
-      <input id="start-lat" type="number" step="any"
-             placeholder="e.g. 61.4981">
+      <div class="row2">
+        <div>
+          <label for="height-cm">Your height (cm)</label>
+          <input id="height-cm" type="number" min="100" max="230" value="175">
+        </div>
+        <div>
+          <label for="carry-mode">Phone position</label>
+          <select id="carry-mode">
+            <option value="hand">In hand, screen up</option>
+            <option value="pocket">In pocket (heading unreliable)</option>
+          </select>
+        </div>
+      </div>
 
-      <label for="start-lon">Starting longitude</label>
-      <input id="start-lon" type="number" step="any"
-             placeholder="e.g. 23.7600">
+      <label for="heading-offset">Heading correction: <span id="offset-label">0°</span></label>
+      <input id="heading-offset" type="range" min="-180" max="180" value="0">
+      <p class="hint">Walk straight toward a known direction and adjust until the arrow matches.</p>
 
-      <button id="set-origin" class="primary">
-        Set starting point
-      </button>
-
-      <button id="reset-estimate">
-        Reset position estimate
-      </button>
+      <button id="set-origin" class="primary">Set starting point</button>
+      <button id="reset-estimate">Reset to start</button>
+      <button id="clear-trail">Clear trail</button>
+      <button id="export-track">Export track (JSON)</button>
     </section>
 
     <section class="card">
       <h2>Phone Sensors</h2>
-      <p id="sensor-status" class="muted">
-        Sensors have not been started.
-      </p>
+      <p id="sensor-status" class="muted">Sensors have not been started.</p>
+      <button id="enable-sensors" class="primary">Enable sensors</button>
+      <button id="stop-sensors">Stop sensors</button>
 
-      <button id="enable-sensors" class="primary">
-        Enable sensors
-      </button>
-
-      <button id="stop-sensors">
-        Stop sensors
-      </button>
-
-      <div class="sensor-row">
-        <span>Compass</span>
-        <strong id="compass-status">Inactive</strong>
-      </div>
-
-      <div class="sensor-row">
-        <span>Motion sensors</span>
-        <strong id="motion-status">Inactive</strong>
-      </div>
+      <div class="sensor-row"><span>Compass</span><strong id="compass-status">Inactive</strong></div>
+      <div class="sensor-row"><span>Motion sensors</span><strong id="motion-status">Inactive</strong></div>
+      <div class="sensor-row"><span>Screen wake lock</span><strong id="wake-status">Off</strong></div>
+      <pre id="log" class="log">Event log…</pre>
     </section>
 
     <section class="card">
       <h2>Alternative Positioning</h2>
       <p class="muted">
-        These methods need native Android functionality and
-        suitable reference data. They are not implemented yet.
+        Wi-Fi and Bluetooth scanning are not available to web pages.
+        They need a native Android plugin (Capacitor) and reference data.
       </p>
-
-      <div class="sensor-row">
-        <span>Wi-Fi positioning</span>
-        <strong id="wifi-status">Not implemented</strong>
-      </div>
-
-      <div class="sensor-row">
-        <span>Bluetooth beacons</span>
-        <strong id="bluetooth-status">Not implemented</strong>
-      </div>
-
-      <div class="sensor-row">
-        <span>Camera positioning</span>
-        <strong>Future feature</strong>
-      </div>
+      <div class="sensor-row"><span>Wi-Fi positioning</span><strong id="wifi-status">Not implemented</strong></div>
+      <div class="sensor-row"><span>Bluetooth beacons</span><strong id="bluetooth-status">Not implemented</strong></div>
+      <div class="sensor-row"><span>Camera positioning</span><strong>Future feature</strong></div>
     </section>
 
     <section class="card">
       <h2>Poma Assistant</h2>
-      <p id="assistant-message">
-        Set a known starting point and enable the phone sensors.
-      </p>
-
-      <button id="explain-positioning">
-        Explain GPS-free positioning
-      </button>
+      <p id="assistant-message">Set a known starting point, enable sensors, then walk.</p>
+      <button id="explain-positioning">Explain GPS-free positioning</button>
     </section>
   </main>
 
-  <footer>
-    Experimental prototype — not for emergency navigation.
-  </footer>
+  <footer>Experimental prototype — not for emergency navigation.</footer>
 </body>
 </html>
