@@ -95,8 +95,8 @@
         if (!s.has) { this.setPosition(fix.lat, fix.lon, fix.acc, fix.src); return "set"; }
         const v = s.sigma * s.sigma, a = fix.acc * fix.acc, K = v / (v + a);
         s.lat += K * (fix.lat - s.lat); s.lon += K * (fix.lon - s.lon);
+        if (fix.acc <= Math.sqrt(v)) s.src = fix.src;      // label follows the most precise source
         s.sigma = Math.sqrt((1 - K) * v);
-        s.src = fix.src;
         return K;
       }
     };
@@ -145,15 +145,18 @@
   const usableCell = c => c && ["lte", "gsm", "wcdma"].includes(c.type) && c.mcc >= 0 && c.mnc >= 0 && c.area > 0 && c.cid > 0 &&
     !(c.cid === 2147483647);
 
-  /* Runs all scans in parallel. Never throws; problems are listed in .errors */
-  async function scan() {
+  /* Runs the enabled scans in parallel (opts: {wifi, ble, cells}, all on by default).
+     Disabled sources are not scanned at all. Never throws; problems are listed in .errors */
+  async function scan(opts) {
+    const o = Object.assign({ wifi: true, ble: true, cells: true }, opts);
     const p = getPlugin();
     const out = { t: Date.now(), wifi: [], ble: [], cells: [], errors: [], throttled: false, cellsFresh: false };
     if (!p) { out.errors.push("ei natiivipluginia"); return out; }
+    const skipped = Promise.resolve({ results: [] });
     const [w, b, c] = await Promise.allSettled([
-      withTimeout(p.scanWifi(), 14000, "wifi"),
-      withTimeout(p.scanBle({ durationMs: 3000 }), 8000, "ble"),
-      withTimeout(p.scanCells(), 8000, "cells")]);
+      o.wifi ? withTimeout(p.scanWifi(), 14000, "wifi") : skipped,
+      o.ble ? withTimeout(p.scanBle({ durationMs: 3000 }), 8000, "ble") : skipped,
+      o.cells ? withTimeout(p.scanCells(), 8000, "cells") : skipped]);
     if (w.status === "fulfilled") { out.wifi = (w.value.results || []).filter(usableWifi); out.throttled = !!w.value.throttled; out.wifiRaw = (w.value.results || []).length; }
     else out.errors.push("wifi: " + errText(w.reason));
     if (b.status === "fulfilled") out.ble = (b.value.results || []).filter(x => x.rssi > -100);
@@ -248,10 +251,12 @@
     }
   }
 
-  async function locate(sc) {
-    const local = locateFingerprint(sc);
+  /* opts: {learned, online} switch the taught-places matching and the BeaconDB lookup on/off */
+  async function locate(sc, opts) {
+    const o = Object.assign({ learned: true, online: true }, opts);
+    const local = o.learned ? locateFingerprint(sc) : null;
     if (local && local.acc <= 25) { lastMessage = "Tunnistettu opittu paikka"; return local; }
-    const online = await locateOnline(sc);
+    const online = o.online ? await locateOnline(sc) : (lastMessage = "Verkkotietokanta pois päältä", null);
     return [local, online].filter(Boolean).sort((a, b) => a.acc - b.acc)[0] || null;
   }
 

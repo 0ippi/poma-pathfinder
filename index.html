@@ -14,7 +14,7 @@
 <body>
   <header class="top">
     <h1>POMA <span>Pathfinder</span></h1>
-    <span class="ver">v10 · ei GPS:ää</span>
+    <span class="ver">v11 · GPS valinnainen</span>
   </header>
 
   <div id="map"><div id="compass"><b id="compass-arrow">↑</b><span id="compass-label">ei suuntaa</span></div></div>
@@ -27,7 +27,7 @@
     <button id="btn-learn">Opi tämä paikka</button>
     <button id="btn-clear">Tyhjennä reitti</button>
   </section>
-  <p class="hint" id="hint">Paina "Paikanna nyt": sovellus lukee Wi-Fi-, Bluetooth- ja mobiiliasemat ja hakee sijainnin. Voit myös napauttaa karttaa asettaaksesi lähtöpisteen käsin.</p>
+  <p class="hint" id="hint">Paina "Paikanna nyt": sovellus käyttää päälle kytkettyjä menetelmiä (kytkimet alempana). Voit myös napauttaa karttaa asettaaksesi lähtöpisteen käsin.</p>
 
   <section class="card">
     <h2>Tila</h2>
@@ -42,6 +42,17 @@
       <dt>Opittuja paikkoja</dt><dd id="s-fp">0</dd>
       <dt>Puhelin</dt><dd id="s-dev">–</dd>
     </dl>
+  </section>
+
+  <section class="card">
+    <h2>Paikannusmenetelmät</h2>
+    <label class="sw"><span>GPS<small>Käyttää satelliitteja kun saatavilla. Oletuksena pois.</small></span><input type="checkbox" data-m="gps"></label>
+    <label class="sw"><span>Wi-Fi<small>Lähellä olevat tukiasemat</small></span><input type="checkbox" data-m="wifi"></label>
+    <label class="sw"><span>Mobiiliasemat<small>Operaattorin tukiasemat</small></span><input type="checkbox" data-m="cells"></label>
+    <label class="sw"><span>Bluetooth<small>Lähellä olevat BLE-laitteet</small></span><input type="checkbox" data-m="ble"></label>
+    <label class="sw"><span>Verkkotietokanta<small>Lähettää Wi-Fi- ja asematunnisteet BeaconDB:lle (vaatii netin)</small></span><input type="checkbox" data-m="online"></label>
+    <label class="sw"><span>Opitut paikat<small>Tunnistaa itse opetetut paikat ilman nettiä</small></span><input type="checkbox" data-m="learned"></label>
+    <label class="sw"><span>Askeleet ja kompassi<small>Siirtää sijaintia kävellessä</small></span><input type="checkbox" data-m="pdr"></label>
   </section>
 
   <section class="card">
