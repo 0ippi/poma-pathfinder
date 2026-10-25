@@ -336,23 +336,108 @@
     el.appendChild(document.createTextNode(text)); $("chat").appendChild(el); scrollChat(); return el;
   }
   const scrollChat = () => { const c = $("chat"); setTimeout(() => { c.scrollTop = c.scrollHeight; }, 30); };
-  async function askAI(text, image) {
-    if (!text && !image) return;
-    addMsg("me", text || "(kuva)", image);
-    const wait = addMsg("ai", "…");
-    const r = await window.PomaAI.ask({ text, image }, aiContext());
-    wait.textContent = r.text; scrollChat();
+  let aiCaps = { vision: false, audio: false }, aiBusy = false, recorder = null;
+  async function askAI(text, image, audio) {
+    if (!text && !image && !audio) return;
+    if (aiBusy) { toast("Edellinen kysymys on vielä kesken"); return; }
+    addMsg("me", text || (audio ? "(puhe)" : "(kuva)"), image);
+    const wait = addMsg("ai", "Mietin…");
+    const model = window.PomaAI.info().mode === "model";
+    let t0 = Date.now(), tick = null;
+    if (model) tick = setInterval(() => { wait.textContent = "Mietin… " + Math.round((Date.now() - t0) / 1000) + " s"; }, 1000);
+    aiBusy = true;
+    try {
+      const r = await window.PomaAI.ask({ text, image, audio }, aiContext());
+      wait.textContent = r.text; if (model) log("AI vastasi " + Math.round((Date.now() - t0) / 1000) + " s");
+    } finally { aiBusy = false; clearInterval(tick); }
+    scrollChat();
   }
+  // Downscale the photo (the model works at <= 768 px anyway) and send it as JPEG.
   function pickImage() {
     const f = document.createElement("input"); f.type = "file"; f.accept = "image/*";
-    f.onchange = () => { const file = f.files && f.files[0]; if (!file) return; const rd = new FileReader();
-      rd.onload = () => askAI($("ai-input").value.trim(), rd.result); $("ai-input").value = ""; rd.readAsDataURL(file); };
+    f.onchange = () => {
+      const file = f.files && f.files[0]; if (!file) return;
+      const url = URL.createObjectURL(file), im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 768 / Math.max(im.width, im.height)), c = document.createElement("canvas");
+        c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        const data = c.toDataURL("image/jpeg", 0.85), q = $("ai-input").value.trim(); $("ai-input").value = "";
+        askAI(q, data);
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); toast("Kuvan lukeminen epäonnistui"); };
+      im.src = url;
+    };
     f.click();
+  }
+  async function toggleMic() {
+    if (recorder) {
+      const r = recorder; recorder = null; $("ai-mic").classList.remove("rec");
+      try { const wav = await r.stop(); askAI($("ai-input").value.trim(), null, wav); $("ai-input").value = ""; }
+      catch (e) { toast(errText(e)); }
+      return;
+    }
+    try { recorder = window.PomaAI.createRecorder(); await recorder.start(); $("ai-mic").classList.add("rec"); toast("Kuuntelen… paina mikkiä uudelleen kun olet valmis"); }
+    catch (e) { recorder = null; $("ai-mic").classList.remove("rec"); toast("Mikrofoni ei auennut: " + errText(e)); log("Mikrofoni: " + errText(e)); }
   }
   function aiHeader() {
     const i = window.PomaAI.info(); $("ai-name").textContent = i.name;
     const m = $("ai-mode"); m.textContent = i.mode === "model" ? "Paikallinen malli" : "Ei tekoälymallia"; m.className = "chip " + (i.mode === "model" ? "ok" : "warn");
-    $("ai-mic").classList.toggle("off", i.mode !== "model"); $("ai-img").classList.toggle("off", i.mode !== "model");
+    $("ai-mic").classList.toggle("off", !(i.mode === "model" && aiCaps.audio)); $("ai-img").classList.toggle("off", !(i.mode === "model" && aiCaps.vision));
+    $("ai-note").textContent = i.mode === "model"
+      ? "Malli pyörii puhelimessa ilman nettiä. Se saa sovelluksen tilan mukaan" + (aiCaps.vision ? ", voit liittää kuvan" : "") + (aiCaps.audio ? " ja puhua" : "") + "."
+      : "Vastaa sovelluksen tilan perusteella (sijainti, tarkkuus, reittipisteet). Kuvat ja puhe vaativat paikallisen mallin.";
+  }
+
+  /* ---- local model management (Asetukset) ---- */
+  const NA = () => window.PomaAI.native;
+  let aiLoading = false, aiStatus = null;
+  async function aiModelRefresh() {
+    const st = $("ai-m-status"), has = NA().available();
+    aiStatus = has ? await NA().status() : null;
+    const dis = x => ["btn-ai-pick", "btn-ai-load", "btn-ai-del", "ai-gpu"].forEach(id => { $(id).disabled = x; });
+    if (!aiStatus) {
+      st.textContent = has ? "Tekoälymoduuli ei ole mukana tässä sovellusversiossa." : "Paikallinen malli toimii vain Android-sovelluksessa.";
+      dis(true); $("btn-ai-goto").hidden = true; return;
+    }
+    const s = aiStatus, loaded = window.PomaAI.info().mode === "model";
+    const ram = (s.totalRamMb / 1024).toFixed(1).replace(".", ",") + " Gt";
+    let t = "Puhelimen muisti " + ram + ", vapaata tilaa " + Math.round(s.freeDiskMb / 1024) + " Gt. ";
+    if (!s.modelExists) t += "Mallia ei ole vielä puhelimessa.";
+    else t += "Malli puhelimessa (" + (s.modelMb / 1024).toFixed(1).replace(".", ",") + " Gt). " + (loaded ? "Ladattu muistiin" + (aiCaps.vision ? ", kuvat" : "") + (aiCaps.audio ? ", puhe" : "") + " käytössä." : "Ei vielä ladattu muistiin.");
+    if (s.totalRamMb < 5500) t += " Varoitus: muistia on vähän, malli voi kaatua tai olla hidas.";
+    st.textContent = t; dis(aiLoading);
+    $("btn-ai-load").textContent = loaded ? "Pura muistista" : "Lataa muistiin"; $("btn-ai-load").disabled = aiLoading || !s.modelExists;
+    $("btn-ai-del").disabled = aiLoading || !s.modelExists;
+    $("btn-ai-goto").hidden = loaded; $("btn-ai-goto").textContent = s.modelExists ? "Lataa tekoälymalli" : "Asenna tekoälymalli";
+  }
+  async function aiLoadToggle() {
+    if (aiLoading) return;
+    if (window.PomaAI.info().mode === "model") {
+      await NA().unload(); window.PomaAI.native.detach(); aiCaps = { vision: false, audio: false }; log("Malli purettu muistista"); aiHeader(); aiModelRefresh(); return;
+    }
+    aiLoading = true; $("btn-ai-load").textContent = "Ladataan… (voi kestää minuutin)"; $("btn-ai-load").disabled = true; log("Ladataan mallia" + ($("ai-gpu").checked ? " (GPU)" : "") + "…");
+    try {
+      const r = await NA().load($("ai-gpu").checked);
+      aiCaps = { vision: !!r.vision, audio: !!r.audio }; NA().attach("Gemma 3n (paikallinen)");
+      log("Malli ladattu: " + r.mode + (r.warnings ? " | huom: " + r.warnings : "")); toast("Malli valmis (" + r.mode + ")");
+    } catch (e) { log("Mallin lataus epäonnistui: " + errText(e)); openSheet({ title: "Mallin lataus epäonnistui", text: errText(e) + "\n\nKopioi loki Asetuksista ja lähetä se kehittäjälle.", buttons: [{ label: "Sulje" }] }); }
+    aiLoading = false; aiHeader(); aiModelRefresh();
+  }
+  async function aiPick() {
+    if (aiLoading) return;
+    aiLoading = true; $("btn-ai-pick").disabled = true; $("ai-m-prog").hidden = false; $("ai-m-bar").style.width = "0";
+    let h = NA().onProgress(p => { const pct = p.totalMb ? Math.min(100, Math.round(100 * p.mb / p.totalMb)) : 0; $("ai-m-bar").style.width = pct + "%"; $("ai-m-status").textContent = "Kopioidaan mallia… " + p.mb + (p.totalMb ? " / " + p.totalMb : "") + " Mt"; });
+    try {
+      if (window.PomaAI.info().mode === "model") { await NA().unload(); NA().detach(); aiCaps = { vision: false, audio: false }; }
+      const r = await NA().pick(); log("Malli kopioitu: " + r.name + " " + r.mb + " Mt"); toast("Malli tallennettu. Paina Lataa muistiin.");
+    } catch (e) { if (!/ei valittu/i.test(errText(e))) openSheet({ title: "Mallin tuonti epäonnistui", text: errText(e), buttons: [{ label: "Sulje" }] }); log("Mallin tuonti: " + errText(e)); }
+    try { h && h.then ? (await h).remove() : h && h.remove && h.remove(); } catch (e) { /* ignore */ }
+    $("ai-m-prog").hidden = true; aiLoading = false; aiHeader(); aiModelRefresh();
+  }
+  function aiDelete() {
+    openSheet({ title: "Poistetaanko malli?", text: "Malli vie useita gigatavuja. Voit tuoda sen myöhemmin uudelleen.", buttons: [
+      { label: "Poista malli", cls: "danger", onClick: async () => { try { await NA().remove(); NA().detach(); aiCaps = { vision: false, audio: false }; log("Malli poistettu"); } catch (e) { toast(errText(e)); } aiHeader(); aiModelRefresh(); } }, { label: "Peruuta" }] });
   }
 
   /* ---------------------------------------------------------------- start */
@@ -380,9 +465,12 @@
     $("sheet").addEventListener("click", e => { if (e.target === $("sheet")) closeSheet(); });
     $("composer").addEventListener("submit", e => { e.preventDefault(); const t = $("ai-input").value.trim(); $("ai-input").value = ""; askAI(t); });
     $("chips").addEventListener("click", e => { const q = e.target.dataset && e.target.dataset.q; if (q) askAI(q); });
-    $("ai-img").addEventListener("click", () => window.PomaAI.info().mode === "model" ? pickImage() : toast("Kuvien ymmärtäminen vaatii paikallisen tekoälymallin (ei vielä asennettu)"));
-    $("ai-mic").addEventListener("click", () => toast(window.PomaAI.info().mode === "model" ? "Puheohjaus tulossa" : "Puheen ymmärtäminen vaatii paikallisen tekoälymallin (ei vielä asennettu)"));
-    aiHeader(); addMsg("ai", "Hei! Olen navigointiapuri. Kerron missä olet, miksi tarkkuus on mikä on ja mihin suuntaan reittipisteesi ovat. En ole vielä oikea tekoäly, mutta vastaan sovelluksen tietojen perusteella.");
+    $("ai-img").addEventListener("click", () => window.PomaAI.info().mode === "model" && aiCaps.vision ? pickImage() : toast("Kuvat vaativat ladatun paikallisen mallin (Asetukset → Tekoälymalli)"));
+    $("ai-mic").addEventListener("click", () => window.PomaAI.info().mode === "model" && aiCaps.audio ? toggleMic() : toast("Puhe vaatii ladatun paikallisen mallin (Asetukset → Tekoälymalli)"));
+    $("btn-ai-pick").addEventListener("click", aiPick); $("btn-ai-load").addEventListener("click", aiLoadToggle); $("btn-ai-del").addEventListener("click", aiDelete);
+    $("btn-ai-goto").addEventListener("click", () => { if (aiStatus && aiStatus.modelExists) { aiLoadToggle(); } else { switchTab("settings"); setTimeout(() => $("ai-card").scrollIntoView({ behavior: "smooth" }), 80); } });
+    aiHeader(); aiModelRefresh();
+    addMsg("ai", "Hei! Olen navigointiapuri. Kerron missä olet, miksi tarkkuus on mikä on ja mihin suuntaan reittipisteesi ovat. Ilman ladattua mallia vastaan sovelluksen tietojen perusteella; paikallinen malli ymmärtää myös kuvia ja puhetta.");
 
     setInterval(stats, 1500);
     applyMethods();

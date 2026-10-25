@@ -127,7 +127,8 @@
     <section class="view" id="view-ai">
       <div class="card ai-status" id="ai-status">
         <div class="ai-st-h"><svg class="ic"><use href="#i-sparkles"/></svg><b id="ai-name">Navigointiapuri</b><span class="chip warn" id="ai-mode">Ei tekoälymallia</span></div>
-        <p class="muted" id="ai-note">Vastaa sovelluksen tilan perusteella (sijainti, tarkkuus, reittipisteet). Paikallinen kuvia ja puhetta ymmärtävä malli on tulossa erillisenä vaiheena.</p>
+        <p class="muted" id="ai-note">Vastaa sovelluksen tilan perusteella (sijainti, tarkkuus, reittipisteet).</p>
+        <button class="btn small" id="btn-ai-goto" hidden>Lataa tekoälymalli</button>
       </div>
       <div id="chat" class="chat"></div>
       <div class="chips" id="chips">
@@ -166,6 +167,24 @@
         <div class="muted" id="fp-count">0 opittua paikkaa</div>
       </div>
 
+      <div class="sec-h"><span>Tekoälymalli (paikallinen)</span></div>
+      <div class="card" id="ai-card">
+        <p class="muted" id="ai-m-status">Tarkistetaan…</p>
+        <div class="progress" id="ai-m-prog" hidden><i id="ai-m-bar"></i></div>
+        <div class="btn-row"><button class="btn" id="btn-ai-pick">Valitse mallitiedosto</button>
+        <button class="btn primary" id="btn-ai-load">Lataa muistiin</button></div>
+        <label class="sw nobd"><svg class="ic"><use href="#i-sparkles"/></svg><span>GPU-kiihdytys<small>Kokeellinen. Jos lataus kaatuu, pidä pois päältä.</small></span><input type="checkbox" id="ai-gpu"></label>
+        <button class="btn danger small" id="btn-ai-del">Poista malli puhelimesta</button>
+        <details><summary>Miten saan mallin puhelimeen?</summary>
+          <ol class="muted steps">
+            <li>Avaa puhelimen selaimella <a href="https://huggingface.co/google/gemma-3n-E2B-it-litert-lm" target="_blank" rel="noopener">huggingface.co/google/gemma-3n-E2B-it-litert-lm</a>, kirjaudu (ilmainen tili) ja hyväksy Gemman lisenssi.</li>
+            <li>Lataa tiedosto <b>gemma-3n-E2B-it-int4.litertlm</b> (usean gigatavun tiedosto, käytä Wi-Fiä).</li>
+            <li>Palaa tähän, paina "Valitse mallitiedosto" ja valitse ladattu tiedosto. Se kopioidaan sovellukselle.</li>
+            <li>Paina "Lataa muistiin". Lataus kestää noin 10–60 s. Malli tarvitsee 4 Gt+ vapaata muistia, joten sulje muut sovellukset.</li>
+          </ol>
+        </details>
+      </div>
+
       <div class="sec-h"><span>Omat arvot</span></div>
       <div class="card list">
         <label class="row"><span>Pituus (cm)<small>Laskee askelpituuden</small></span><input id="set-height" type="number" min="100" max="230" value="175"></label>
@@ -184,7 +203,7 @@
           <pre id="log"></pre>
         </details>
       </div>
-      <p class="muted foot">POMA Pathfinder v12 · Verkkotietokanta-kytkimen ollessa päällä Wi-Fi- ja asematunnisteet lähetetään BeaconDB:lle sijainnin hakemiseksi.</p>
+      <p class="muted foot">POMA Pathfinder v13 · Verkkotietokanta-kytkimen ollessa päällä Wi-Fi- ja asematunnisteet lähetetään BeaconDB:lle sijainnin hakemiseksi.</p>
     </section>
   </main>
 

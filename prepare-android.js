@@ -2,6 +2,9 @@
 const fs = require("fs"), path = require("path");
 const dir = path.join("android", "app", "src", "main", "java", "fi", "poma", "pathfinder");
 fs.mkdirSync(dir, { recursive: true });
+// Optional on-device AI: only built when PomaAiPlugin.kt is in the repository root.
+// If the build ever fails because of it, delete PomaAiPlugin.kt from the repo and the app builds without AI.
+const AI = fs.existsSync("PomaAiPlugin.kt");
 fs.copyFileSync("PomaSensorsPlugin.java", path.join(dir, "PomaSensorsPlugin.java"));
 fs.writeFileSync(path.join(dir, "MainActivity.java"), `package fi.poma.pathfinder;
 
@@ -12,7 +15,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PomaSensorsPlugin.class);
-        super.onCreate(savedInstanceState);
+${AI ? "        registerPlugin(PomaAiPlugin.class);\n" : ""}        super.onCreate(savedInstanceState);
     }
 }
 `);
@@ -40,4 +43,19 @@ if (fs.existsSync("icon.png") && fs.existsSync(res)) {
     }
   }
 }
+
+if (AI) {
+  fs.copyFileSync("PomaAiPlugin.kt", path.join(dir, "PomaAiPlugin.kt"));
+  const edit = (file, fn) => { const t = fs.readFileSync(file, "utf8"); const n = fn(t); if (n === t) throw new Error("AI-asetus ei muuttanut tiedostoa: " + file); fs.writeFileSync(file, n); };
+  // Kotlin Gradle plugin (the AI library is written in Kotlin and needs a recent compiler)
+  edit(path.join("android", "build.gradle"), t => t.replace("classpath 'com.android.tools.build:gradle:8.7.2'", "classpath 'com.android.tools.build:gradle:8.7.2'\n        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21'"));
+  // LiteRT-LM needs minSdk 24
+  edit(path.join("android", "variables.gradle"), t => t.replace("minSdkVersion = 23", "minSdkVersion = 24"));
+  edit(path.join("android", "app", "build.gradle"), t => t
+    .replace("apply plugin: 'com.android.application'", "apply plugin: 'com.android.application'\napply plugin: 'org.jetbrains.kotlin.android'")
+    .replace("dependencies {\n", "kotlin {\n    compilerOptions {\n        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21\n    }\n}\n\ndependencies {\n    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.18.0'\n    implementation \"androidx.activity:activity:$androidxActivityVersion\"\n"));
+  // GPU libraries for the vision encoder
+  edit(mf, t => t.replace("</application>", '    <uses-native-library android:name="libvndksupport.so" android:required="false" />\n        <uses-native-library android:name="libOpenCL.so" android:required="false" />\n    </application>'));
+  console.log("AI-moduuli mukana (PomaAiPlugin.kt)");
+} else console.log("AI-moduulia ei mukana (PomaAiPlugin.kt puuttuu)");
 console.log("Android project prepared");

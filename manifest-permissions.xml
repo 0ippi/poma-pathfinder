@@ -12,3 +12,7 @@
 <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 <uses-feature android:name="android.hardware.telephony" android:required="false" />
+<!-- Microphone: only used when you press the mic button in the AI tab -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+<uses-feature android:name="android.hardware.microphone" android:required="false" />

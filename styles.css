@@ -166,3 +166,9 @@ pre { white-space:pre-wrap; word-break:break-word; font-size:11px; max-height:28
 .sos b{font-size:16px;letter-spacing:.04em}
 .sos small{font-size:12px;opacity:.9}
 .sos small{color:#fff;opacity:.95;margin-top:2px}
+
+.progress{height:8px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin:8px 0}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.sw.nobd{border:0;padding-left:0;padding-right:0}
+.steps{padding-left:20px;margin:8px 0} .steps li{margin:6px 0} .steps a{color:var(--accent)}
+.composer .icon-btn.rec{background:#B91C1C;color:#fff;border-radius:50%;animation:blink 1s infinite}

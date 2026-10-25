@@ -111,11 +111,125 @@
     return { text: rules(text, ctx), mode: "rules" };
   }
 
+
+  /* ---------------------------------------------------------------- native model bridge (Android) */
+  let nativePlugin;
+  function plugin() {
+    if (nativePlugin !== undefined) return nativePlugin;
+    nativePlugin = null;
+    try {
+      const C = root.Capacitor;
+      if (C && C.isNativePlatform && C.isNativePlatform()) nativePlugin = (C.Plugins && C.Plugins.PomaAI) || (C.registerPlugin && C.registerPlugin("PomaAI")) || null;
+    } catch (e) { nativePlugin = null; }
+    return nativePlugin;
+  }
+
+  const SYSTEM = "Olet Poma Pathfinder -sovelluksen navigointiapuri. Vastaa aina suomeksi, lyhyesti (enintään 3–4 lausetta) ja selkeästi. " +
+    "Käytä vain sovelluksen antamia tietoja sijainnista, tarkkuudesta ja reittipisteistä. Älä keksi koordinaatteja, katuja tai paikannimiä. " +
+    "Jos sijainnin tarkkuus on huono, sano se. Kuvasta kerro vain se, mikä siinä näkyy ja auttaa suunnistamaan (maamerkit, kyltit, suunta); " +
+    "älä väitä tietäväsi tarkkaa sijaintia pelkästä kuvasta. Hätätilanteessa neuvo soittamaan 112.";
+
+  function stateText(c) {
+    if (!c) return "";
+    const l = [];
+    if (c.pos) l.push("Sijainti: " + c.pos.lat.toFixed(5) + ", " + c.pos.lon.toFixed(5) + ", tarkkuus " + fmtAcc(c.sigma) + ", lähde: " + c.src + ".");
+    else l.push("Sijaintia ei vielä tiedossa.");
+    if (c.heading != null) l.push("Puhelimen suunta: " + Math.round(c.heading) + " astetta.");
+    if (c.steps) l.push("Askelia: " + c.steps + " (" + fmtDist(c.meters) + ").");
+    const wps = (c.waypoints || []).filter(w => w.dist != null);
+    if (wps.length) l.push("Reittipisteet: " + wps.map(w => w.name + " " + fmtDist(w.dist) + ", suunta " + Math.round(w.bearing) + "° " + w.cardinal + (c.heading != null ? " (" + turnText(w.turn) + ")" : "")).join("; ") + ".");
+    if (c.target) { const t = (c.waypoints || []).find(w => w.id === c.target); if (t) l.push("Aktiivinen kohde: " + t.name + "."); }
+    return l.join("\n");
+  }
+
+  const native = {
+    available: () => !!plugin(),
+    async status() {
+      const p = plugin(); if (!p) return null;
+      try { return await p.status(); } catch (e) { return null; } // plugin missing from this build
+    },
+    pick: () => plugin().pickModel(),
+    load: gpu => plugin().load({ gpu: !!gpu }),
+    unload: () => plugin().unload(),
+    remove: () => plugin().removeModel(),
+    onProgress(fn) { const p = plugin(); return p && p.addListener ? p.addListener("copyProgress", fn) : null; },
+    attach(name) {
+      backend = {
+        name: name || "Gemma 3n (paikallinen)",
+        ask: async (input, ctx) => {
+          const prompt = (stateText(ctx) ? "Sovelluksen tila:\n" + stateText(ctx) + "\n\n" : "") +
+            (input.audio ? "Käyttäjä puhui kysymyksen (äänitiedosto). Vastaa siihen." + (input.text ? " Lisäksi hän kirjoitti: " + input.text : "")
+              : "Kysymys: " + (input.text || "Kuvaile kuvaa navigoinnin kannalta."));
+          const r = await plugin().ask({ text: prompt, system: SYSTEM, image: input.image ? String(input.image).replace(/^data:[^,]*,/, "") : undefined, audio: input.audio || undefined });
+          return String(r.text || "").trim() || "(tyhjä vastaus)";
+        }
+      };
+    },
+    detach() { backend = null; }
+  };
+
+  /* ---------------------------------------------------------------- audio: 16 kHz mono 16-bit WAV (base64) */
+  function resampleTo16k(samples, rate) {
+    if (rate === 16000) return samples;
+    const ratio = rate / 16000, n = Math.floor(samples.length / ratio), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {   // box filter average avoids aliasing when downsampling
+      const a = Math.floor(i * ratio), b = Math.min(samples.length, Math.max(a + 1, Math.floor((i + 1) * ratio)));
+      let s = 0; for (let j = a; j < b; j++) s += samples[j];
+      out[i] = s / (b - a);
+    }
+    return out;
+  }
+  function wavBytes(samples16k) {
+    const n = samples16k.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 16000, true); v.setUint32(28, 32000, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) { const s = Math.max(-1, Math.min(1, samples16k[i])); v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
+    return new Uint8Array(buf);
+  }
+  function toBase64(bytes) {
+    let s = ""; const CH = 0x8000;
+    for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return (typeof btoa === "function" ? btoa(s) : Buffer.from(s, "binary").toString("base64"));
+  }
+  const wavBase64 = (samples, rate) => toBase64(wavBytes(resampleTo16k(samples, rate)));
+
+  /** Records from the microphone until stop() is called (max 30 s). Resolves to base64 WAV. */
+  function createRecorder() {
+    let ctx, stream, node, src, chunks = [], rate = 48000, done, timer;
+    return {
+      async start() {
+        if (!(root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) throw new Error("Mikrofoni ei ole käytettävissä");
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+        const AC = root.AudioContext || root.webkitAudioContext; ctx = new AC(); rate = ctx.sampleRate;
+        src = ctx.createMediaStreamSource(stream); node = ctx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = e => { chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+        src.connect(node); node.connect(ctx.destination);
+        done = new Promise(res => { this._finish = res; });
+        timer = setTimeout(() => this.stop(), 30000);
+      },
+      async stop() {
+        clearTimeout(timer);
+        try { node.disconnect(); src.disconnect(); } catch (e) { /* ignore */ }
+        try { stream.getTracks().forEach(t => t.stop()); } catch (e) { /* ignore */ }
+        try { await ctx.close(); } catch (e) { /* ignore */ }
+        let len = 0; chunks.forEach(c => { len += c.length; });
+        const all = new Float32Array(len); let o = 0; chunks.forEach(c => { all.set(c, o); o += c.length; });
+        if (this._finish) this._finish();
+        if (len < rate * 0.4) throw new Error("Ääni oli liian lyhyt");
+        return wavBase64(all, rate);
+      }
+    };
+  }
+
   root.PomaAI = {
     ask,
     useBackend(b) { backend = b || null; },
     info() { return backend ? { mode: "model", name: backend.name || "malli" } : { mode: "rules", name: "Sääntöpohjainen apuri" }; },
+    native,
+    createRecorder,
     // exposed for tests
-    _rules: rules
+    _rules: rules, _wav: wavBase64, _state: stateText, _resample: resampleTo16k
   };
 })(typeof window !== "undefined" ? window : globalThis);
