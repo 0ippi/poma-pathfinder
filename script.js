@@ -1,5 +1,5 @@
-/* Poma Pathfinder – app: map, sensors, method switches and buttons.
-   Positioning logic lives in wireless.js. */
+/* POMA Pathfinder – app: tabs, compass, map, waypoints, assistant, method switches.
+   Positioning logic lives in wireless.js, the Tekoäly tab's answers in ai.js. */
 (function () {
   "use strict";
   const E = window.PomaEngine;
@@ -9,94 +9,202 @@
   const S = tracker.state;
   const RAD = Math.PI / 180;
 
-  let map, marker, circle, trail, trailPts = [];
-  let heading = null, hv = { s: 0, c: 0, n: 0 };          // smoothed magnetic heading
+  let map, marker, circle, trail, trailPts = [], wpLayer, targetLine;
+  let heading = null, hv = { s: 0, c: 0, n: 0 };            // smoothed magnetic heading
   let lastScan = null, busy = false, tracking = false, netTimer = null, wakeLock = null, absSeen = false;
-  let sensorsOn = false, gpsWatch = null;
+  let compassOn = false, motionOn = false, gpsWatch = null, lastProblems = [], lastSave = 0;
+  let waypoints = [], targetId = null, tab = "nav";
 
-  /* ---------------------------------------------------------------- method switches (saved on the phone) */
+  /* ---------------------------------------------------------------- storage helpers */
+  const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
+
+  /* ---------------------------------------------------------------- method switches */
   const DEFAULTS = { gps: false, wifi: true, cells: true, ble: true, online: true, learned: true, pdr: true };
   const METHOD_NAMES = { gps: "GPS", wifi: "Wi-Fi", cells: "mobiiliasemat", ble: "Bluetooth", online: "verkkotietokanta", learned: "opitut paikat", pdr: "askeleet ja kompassi" };
-  let M = Object.assign({}, DEFAULTS);
-  try { Object.assign(M, JSON.parse(localStorage.getItem("poma.methods.v1")) || {}); } catch (e) { /* defaults */ }
-  const saveMethods = () => { try { localStorage.setItem("poma.methods.v1", JSON.stringify(M)); } catch (e) { /* ignore */ } };
-  const radioOn = () => M.wifi || M.cells || M.ble;       // anything that needs a radio scan
+  const M = Object.assign({}, DEFAULTS, load("poma.methods.v1", {}));
+  const radioOn = () => M.wifi || M.cells || M.ble;
 
-  /* ---------------------------------------------------------------- log (visible in the app) */
+  /* ---------------------------------------------------------------- log */
   const lines = [];
   function log(msg) {
-    const t = new Date().toTimeString().slice(0, 8);
-    lines.push(t + "  " + msg);
+    lines.push(new Date().toTimeString().slice(0, 8) + "  " + msg);
     if (lines.length > 150) lines.shift();
-    const el = $("log");
-    if (el) { el.textContent = lines.join("\n"); el.scrollTop = el.scrollHeight; }
+    const el = $("log"); if (el) { el.textContent = lines.join("\n"); el.scrollTop = el.scrollHeight; }
     console.log("[Poma] " + msg);
   }
   function copyLog() {
     const ta = document.createElement("textarea");
     ta.value = lines.join("\n"); document.body.appendChild(ta); ta.select();
     let ok = false; try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
-    ta.remove(); log(ok ? "Loki kopioitu leikepöydälle" : "Kopiointi ei onnistunut, valitse teksti käsin");
+    ta.remove(); toast(ok ? "Loki kopioitu" : "Kopiointi ei onnistunut, valitse teksti käsin");
   }
   const errText = e => String((e && (e.message || e.errorMessage)) || e);
+  let toastTimer;
+  function toast(msg) {
+    const t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
 
   /* ---------------------------------------------------------------- settings */
   const stepLen = () => Math.min(230, Math.max(100, +$("set-height").value || 175)) * 0.00415;   // metres
   const declination = () => +$("set-decl").value || 0;
   const trueHeading = () => heading == null ? null : E.norm360(heading + declination());
+  const fmtDist = m => m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + " km" : Math.round(m) + " m";
+  const fmtAcc = m => "±" + fmtDist(m);
+  const turnText = t => { const a = Math.abs(Math.round(t)); return a <= 15 ? "suoraan eteenpäin" : a >= 165 ? "käänny ympäri" : "käänny " + (t > 0 ? "oikealle" : "vasemmalle") + " " + a + "°"; };
+
+  /* ---------------------------------------------------------------- sheet (bottom dialog) */
+  function openSheet(o) {
+    $("sheet-title").textContent = o.title || ""; $("sheet-text").textContent = o.text || "";
+    const inp = $("sheet-input"); inp.hidden = !o.input; inp.value = o.input ? (o.input.value || "") : ""; inp.placeholder = o.input ? o.input.placeholder || "" : "";
+    const box = $("sheet-btns"); box.innerHTML = "";
+    (o.buttons || []).forEach(b => {
+      const el = document.createElement("button"); el.className = "btn " + (b.cls || ""); el.textContent = b.label;
+      el.addEventListener("click", () => { const v = inp.value.trim(); closeSheet(); if (b.onClick) b.onClick(v); });
+      box.appendChild(el);
+    });
+    $("sheet").hidden = false; if (o.input) setTimeout(() => inp.focus(), 80);
+  }
+  const closeSheet = () => { $("sheet").hidden = true; };
+
+  /* ---------------------------------------------------------------- tabs */
+  function switchTab(name) {
+    tab = name;
+    document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+    $("main").classList.toggle("nopad", name === "map");
+    if (name === "map" && map) setTimeout(() => { map.invalidateSize(); if (S.has && !map._poma) { map.setView([S.lat, S.lon], Math.max(map.getZoom(), 15)); map._poma = 1; } }, 60);
+    if (name === "ai") scrollChat();
+    stats();
+  }
+
+  /* ---------------------------------------------------------------- waypoints */
+  function wpInfo(w) {
+    if (!S.has) return null;
+    const b = E.bearing(S, w), th = trueHeading();
+    return { dist: E.distM(S, w), bearing: b, cardinal: E.cardinalFi(b), turn: th == null ? 0 : E.turnAngle(th, b) };
+  }
+  function addWaypoint(lat, lon, suggested) {
+    openSheet({
+      title: "Uusi reittipiste", text: lat.toFixed(5) + ", " + lon.toFixed(5),
+      input: { placeholder: "Nimi, esim. Auto", value: suggested || "Piste " + (waypoints.length + 1) },
+      buttons: [
+        { label: "Tallenna", cls: "primary", onClick: name => {
+          waypoints.push({ id: Date.now(), name: name || "Piste " + (waypoints.length + 1), lat, lon }); save("poma.waypoints.v1", waypoints);
+          log("Reittipiste tallennettu: " + name); toast("Reittipiste tallennettu"); renderWaypoints(); drawWaypoints(); } },
+        { label: "Peruuta" }]
+    });
+  }
+  function deleteWaypoint(id) {
+    waypoints = waypoints.filter(w => w.id !== id); if (targetId === id) targetId = null;
+    save("poma.waypoints.v1", waypoints); renderWaypoints(); drawWaypoints(); stats();
+  }
+  function setTarget(id) { targetId = targetId === id ? null : id; renderWaypoints(); drawWaypoints(); stats(); if (targetId) toast("Opastus päällä"); }
+  function renderWaypoints() {
+    const box = $("wp-list"); box.innerHTML = "";
+    if (!waypoints.length) { box.innerHTML = '<div class="empty">Ei reittipisteitä. Tallenna nykyinen paikka tai napauta karttaa.</div>'; return; }
+    waypoints.forEach(w => {
+      const i = wpInfo(w), el = document.createElement("div"); el.className = "wp" + (w.id === targetId ? " active" : "");
+      el.innerHTML = '<svg class="ic"><use href="#i-flag"/></svg><div class="wp-t"><div class="wp-n"></div><div class="wp-d"></div></div>' +
+        '<button class="go"></button><button class="icon-btn del" aria-label="Poista"><svg class="ic"><use href="#i-trash-2"/></svg></button>';
+      el.querySelector(".wp-n").textContent = w.name;
+      el.querySelector(".wp-d").textContent = i ? "Suunta " + Math.round(i.bearing) + "° " + i.cardinal + " · " + fmtDist(i.dist) : w.lat.toFixed(4) + ", " + w.lon.toFixed(4);
+      const go = el.querySelector(".go"); go.textContent = w.id === targetId ? "Lopeta" : "Opasta"; go.addEventListener("click", () => setTarget(w.id));
+      el.querySelector(".del").addEventListener("click", () => openSheet({ title: "Poistetaanko \"" + w.name + "\"?", buttons: [{ label: "Poista", cls: "danger", onClick: () => deleteWaypoint(w.id) }, { label: "Peruuta" }] }));
+      box.appendChild(el);
+    });
+  }
 
   /* ---------------------------------------------------------------- map */
   function initMap() {
-    if (!window.L) { $("map").insertAdjacentHTML("beforeend", '<p class="hint" style="padding:24px">Karttaa ei voitu ladata (tarvitsee internetin ensimmäisellä kerralla).</p>'); return; }
+    if (!window.L) { $("map").innerHTML = '<p class="muted" style="padding:80px 24px;text-align:center">Karttaa ei voitu ladata. Tarvitaan internet ensimmäisellä kerralla.</p>'; return; }
     map = L.map("map", { zoomControl: true }).setView([64.5, 26], 5);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-    trail = L.polyline([], { color: "#4cc9a0", weight: 4 }).addTo(map);
+    trail = L.polyline([], { color: "#38BDF8", weight: 4, opacity: .9 }).addTo(map);
+    wpLayer = L.layerGroup().addTo(map);
     map.on("click", e => {
-      tracker.setPosition(e.latlng.lat, e.latlng.lng, 10, "käsin asetettu");
-      log("Lähtöpiste asetettu käsin kartalta");
-      trailPts = []; draw(true);
+      const { lat, lng } = e.latlng;
+      openSheet({ title: "Valittu piste", text: lat.toFixed(5) + ", " + lng.toFixed(5), buttons: [
+        { label: "Aseta tämä sijainnikseni", cls: "primary", onClick: () => { tracker.setPosition(lat, lng, 10, "käsin asetettu"); trailPts = []; log("Sijainti asetettu käsin kartalta"); draw(true); stats(); toast("Sijainti asetettu"); } },
+        { label: "Lisää reittipiste tähän", onClick: () => addWaypoint(lat, lng) },
+        { label: "Peruuta" }] });
     });
+    drawWaypoints();
   }
   function draw(recenter) {
     if (!map || !S.has) return;
     const ll = [S.lat, S.lon];
     if (!marker) {
-      marker = L.marker(ll, { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(map);
-      circle = L.circle(ll, { radius: S.sigma, color: "#4cc9a0", weight: 1, fillOpacity: 0.12 }).addTo(map);
+      marker = L.marker(ll, { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), zIndexOffset: 1000 }).addTo(map);
+      circle = L.circle(ll, { radius: S.sigma, color: "#38BDF8", weight: 1, fillOpacity: 0.1 }).addTo(map);
     }
     marker.setLatLng(ll); circle.setLatLng(ll); circle.setRadius(Math.max(3, S.sigma));
     trailPts.push(ll); if (trailPts.length > 2000) trailPts.shift(); trail.setLatLngs(trailPts);
     if (recenter) {
       const z = S.sigma > 3000 ? 12 : S.sigma > 400 ? 14 : S.sigma > 80 ? 16 : 18;
-      map.setView(ll, Math.max(map.getZoom(), z));
+      map.setView(ll, Math.max(map.getZoom(), z)); map._poma = 1;
     }
+    drawWaypoints();
+    if (Date.now() - lastSave > 5000) { lastSave = Date.now(); save("poma.last.v1", { lat: S.lat, lon: S.lon, sigma: S.sigma, t: Date.now() }); }
+  }
+  function drawWaypoints() {
+    if (!map) return;
+    wpLayer.clearLayers();
+    waypoints.forEach(w => {
+      const on = w.id === targetId;
+      L.marker([w.lat, w.lon], { icon: L.divIcon({ className: "", html: '<div class="wp-pin' + (on ? " on" : "") + '"></div>', iconSize: [26, 26], iconAnchor: [4, 26] }) })
+        .bindTooltip(w.name, { direction: "top", offset: [8, -22] }).addTo(wpLayer);
+    });
+    if (targetLine) { map.removeLayer(targetLine); targetLine = null; }
+    const t = waypoints.find(w => w.id === targetId);
+    if (t && S.has) targetLine = L.polyline([[S.lat, S.lon], [t.lat, t.lon]], { color: "#F97316", weight: 3, dashArray: "6 8" }).addTo(map);
   }
 
-  /* ---------------------------------------------------------------- stats */
-  const fmtAcc = m => m >= 1000 ? "±" + (m / 1000).toFixed(1) + " km" : "±" + Math.round(m) + " m";
+  /* ---------------------------------------------------------------- UI refresh */
+  function banner(text) { $("banner").hidden = !text; $("banner-text").textContent = text || ""; }
   function stats() {
-    $("s-pos").textContent = S.has ? S.lat.toFixed(5) + ", " + S.lon.toFixed(5) : "ei vielä";
-    $("s-acc").textContent = S.has ? fmtAcc(S.sigma) : "–";
-    $("s-src").textContent = S.src || "–";
-    $("s-steps").textContent = S.steps + (S.meters ? " (" + Math.round(S.meters) + " m)" : "");
     const th = trueHeading();
-    $("s-head").textContent = !M.pdr ? "pois päältä" : th == null ? "ei kompassia" : Math.round(th) + "°";
-    $("compass-label").textContent = th == null ? "ei suuntaa" : Math.round(th) + "°";
-    $("compass-arrow").style.transform = "rotate(" + (th || 0) + "deg)";
+    // compass
+    $("head-deg").textContent = th == null ? "–" : Math.round(th); $("head-degsign").hidden = th == null;
+    $("head-dir").textContent = th == null ? "EI KOMPASSIA" : E.cardinalFi(th);
+    $("head-sub").textContent = !M.pdr ? "Askeleet ja kompassi on pois päältä (Asetukset)" : th == null ? "Odotetaan kompassia… pidä puhelinta kädessä" : "Magneettinen pohjoinen + korjaus " + (declination() >= 0 ? "+" : "") + declination() + "°";
+    $("ring").style.transform = "rotate(" + (th == null ? 0 : -th) + "deg)";
+    // target
+    const t = waypoints.find(w => w.id === targetId), g = $("guide"), tm = $("tmark");
+    tm.hidden = true; g.className = "guide";
+    if (t && S.has) {
+      const i = wpInfo(t); tm.hidden = false; tm.style.transform = "rotate(" + i.bearing + "deg)";
+      if (i.dist < 10) { g.textContent = "Perillä: " + t.name; g.classList.add("arrived"); }
+      else { g.textContent = t.name + " · " + fmtDist(i.dist) + " · " + (th == null ? "suunta " + Math.round(i.bearing) + "° " + i.cardinal : turnText(i.turn)); g.classList.add("target"); }
+    } else if (t) g.textContent = t.name + ": odotetaan sijaintia";
+    else g.textContent = "Ei kohdetta. Valitse reittipiste alta ja paina Opasta.";
+    // cards
+    $("n-pos").textContent = S.has ? S.lat.toFixed(5) + ", " + S.lon.toFixed(5) : "ei vielä";
+    $("n-acc").textContent = S.has ? fmtAcc(S.sigma) : "–"; $("n-src").textContent = S.src || "Paina Paikanna";
+    $("n-steps").textContent = S.steps; $("n-meters").textContent = Math.round(S.meters) + " m kuljettu";
+    const pill = $("pill-src"); $("pill-src-text").textContent = S.has ? S.src.replace("viimeisin tunnettu","viim. tunnettu") + " " + fmtAcc(S.sigma) : "Ei sijaintia";
+    pill.className = "pill" + (S.has ? (S.sigma < 100 ? " ok" : " warn") : "");
+    // settings
     if (lastScan) $("s-scan").textContent = lastScan.wifi.length + " / " + lastScan.ble.length + " / " + lastScan.cells.length;
     $("s-msg").textContent = E.message() || "–";
-    $("s-fp").textContent = E.counts().fingerprints;
+    const n = E.counts().fingerprints; $("fp-count").textContent = n + (n === 1 ? " opittu paikka" : " opittua paikkaa");
+    if (tab === "nav") renderWaypointsLive();
   }
-  function banner(text) { const b = $("banner"); b.hidden = !text; b.textContent = text || ""; }
+  function renderWaypointsLive() {   // refresh distances without rebuilding buttons
+    const rows = document.querySelectorAll("#wp-list .wp");
+    waypoints.forEach((w, k) => { const r = rows[k]; if (!r) return; const i = wpInfo(w);
+      if (i) r.querySelector(".wp-d").textContent = "Suunta " + Math.round(i.bearing) + "° " + i.cardinal + " · " + fmtDist(i.dist); });
+  }
   function checkStatus(st) {
     if (!st) return;
     $("s-dev").textContent = st.device + " · Android API " + st.sdk;
-    const problems = [];
-    if (!st.locationPermission) problems.push("Anna sovellukselle sijaintilupa (tarvitaan Wi-Fi- ja asematietojen lukemiseen).");
-    if (!st.locationServicesOn) problems.push("Laita puhelimen Sijainti-asetus päälle. Android estää muuten Wi-Fi- ja asematiedot kaikilta sovelluksilta. GPS:ää sovellus käyttää vain jos GPS-kytkin on päällä.");
-    if (M.wifi && !st.wifiEnabled) problems.push("Laita Wi-Fi päälle (ei tarvitse olla yhdistettynä).");
-    if (M.cells && !st.hasTelephony) problems.push("Laitteessa ei ole matkapuhelinyhteyttä, solupaikannus ei käytössä.");
-    banner(problems.join(" "));
+    const p = [];
+    if (!st.locationPermission) p.push("Anna sovellukselle sijaintilupa (tarvitaan Wi-Fi- ja asematietojen lukemiseen).");
+    if (!st.locationServicesOn) p.push("Laita puhelimen Sijainti-asetus päälle. Android estää muuten Wi-Fi- ja asematiedot kaikilta sovelluksilta. GPS:ää sovellus käyttää vain jos GPS-kytkin on päällä.");
+    if (M.wifi && !st.wifiEnabled) p.push("Laita Wi-Fi päälle (ei tarvitse olla yhdistettynä).");
+    if (M.cells && !st.hasTelephony) p.push("Laitteessa ei ole matkapuhelinyhteyttä, solupaikannus ei käytössä.");
+    lastProblems = p; banner(p.join(" "));
   }
 
   /* ---------------------------------------------------------------- GPS (optional) */
@@ -107,158 +215,179 @@
     const fix = { lat: c.latitude, lon: c.longitude, acc: Math.max(3, c.accuracy), src: "GPS" };
     const r = tracker.fuse(fix);
     log("GPS: " + fix.lat.toFixed(5) + ", " + fix.lon.toFixed(5) + " " + fmtAcc(fix.acc));
-    draw(r === "set"); stats();
-    return fix;
+    draw(r === "set"); stats(); return fix;
   }
   function gpsOnce() {
     return new Promise(resolve => {
       if (!navigator.geolocation) { log("GPS ei käytettävissä tässä näkymässä"); return resolve(null); }
-      navigator.geolocation.getCurrentPosition(p => resolve(onGps(p)),
-        e => { log("GPS: " + (GPS_ERR[e.code] || e.message)); resolve(null); },
+      navigator.geolocation.getCurrentPosition(p => resolve(onGps(p)), e => { log("GPS: " + (GPS_ERR[e.code] || e.message)); resolve(null); },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
     });
   }
   function startGpsWatch() {
     if (gpsWatch != null || !navigator.geolocation) return;
-    gpsWatch = navigator.geolocation.watchPosition(onGps, e => log("GPS: " + (GPS_ERR[e.code] || e.message)),
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+    gpsWatch = navigator.geolocation.watchPosition(onGps, e => log("GPS: " + (GPS_ERR[e.code] || e.message)), { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
     log("GPS-seuranta päällä");
   }
-  function stopGpsWatch() {
-    if (gpsWatch == null) return;
-    navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; log("GPS-seuranta pois");
-  }
+  function stopGpsWatch() { if (gpsWatch == null) return; navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; log("GPS-seuranta pois"); }
 
   /* ---------------------------------------------------------------- positioning */
   async function radioFix(reason) {
     if (!radioOn()) return null;
-    if (!E.available()) { banner("Radioskannaus toimii vain Android-sovelluksessa (ei selaimessa)."); log("Ei natiivipluginia, ei selainta varten"); return null; }
+    if (!E.available()) { banner("Radioskannaus toimii vain Android-sovelluksessa (ei selaimessa)."); log("Ei natiivipluginia"); return null; }
     log("Radiohaku (" + reason + "): " + ["wifi", "cells", "ble"].filter(k => M[k]).map(k => METHOD_NAMES[k]).join(", "));
     const st = await E.prepare(); checkStatus(st);
     const sc = lastScan = await E.scan({ wifi: M.wifi, ble: M.ble, cells: M.cells });
-    log("Skannaus: " + sc.wifi.length + " Wi-Fi (" + (sc.wifiRaw || 0) + " raakana" + (sc.throttled ? ", Android rajoitti" : "") + "), " +
-        sc.ble.length + " BLE, " + sc.cells.length + " solua" + (sc.errors.length ? " | virheet: " + sc.errors.join("; ") : ""));
+    log("Skannaus: " + sc.wifi.length + " Wi-Fi (" + (sc.wifiRaw || 0) + " raakana" + (sc.throttled ? ", Android rajoitti" : "") + "), " + sc.ble.length + " BLE, " + sc.cells.length + " solua" + (sc.errors.length ? " | virheet: " + sc.errors.join("; ") : ""));
     const fix = await E.locate(sc, { learned: M.learned, online: M.online });
     if (!fix) { log("Radioilla ei sijaintia: " + E.message()); return null; }
     const r = tracker.fuse(fix);
     log("Sijainti: " + fix.lat.toFixed(5) + ", " + fix.lon.toFixed(5) + " " + fmtAcc(fix.acc) + " (" + fix.src + ")");
-    draw(r === "set");
-    return fix;
+    draw(r === "set"); return fix;
   }
-
   async function locateNow(reason) {
     if (busy) return;
-    if (!M.gps && !radioOn()) { log("Kaikki hakumenetelmät ovat pois päältä. Kytke jokin päälle."); banner("Kytke vähintään yksi paikannusmenetelmä päälle (GPS, Wi-Fi, mobiiliasemat tai Bluetooth)."); return; }
+    if (!M.gps && !radioOn()) { log("Kaikki hakumenetelmät ovat pois päältä"); banner("Kytke vähintään yksi paikannusmenetelmä päälle (GPS, Wi-Fi, mobiiliasemat tai Bluetooth) Asetuksissa."); return; }
     busy = true; $("btn-locate").disabled = true;
-    try {
-      await Promise.all([M.gps ? gpsOnce() : null, radioFix(reason).catch(e => { log("Virhe: " + errText(e)); })]);
-    } catch (e) { log("Virhe: " + errText(e)); }
-    finally { busy = false; $("btn-locate").disabled = false; stats(); }
+    try { await Promise.all([M.gps ? gpsOnce() : null, radioFix(reason).catch(e => log("Virhe: " + errText(e)))]); }
+    catch (e) { log("Virhe: " + errText(e)); }
+    finally { busy = false; $("btn-locate").disabled = false; stats(); renderWaypoints(); if (!S.has) toast("Sijaintia ei löytynyt: katso Asetukset → Viimeisin haku"); }
   }
-
   async function learnHere() {
-    if (!S.has) { log("Aseta ensin sijainti: paina karttaa tai Paikanna nyt"); return; }
-    if (!E.available()) { log("Oppiminen toimii vain Android-sovelluksessa"); return; }
-    if (!radioOn()) { log("Kytke Wi-Fi, mobiiliasemat tai Bluetooth päälle, jotta on mitä oppia"); return; }
-    if (S.sigma > 30 && !confirm("Sijainnin tarkkuus on vain " + fmtAcc(S.sigma) + ". Opittu paikka on yhtä väärä. Napauta ensin karttaa täsmälleen siihen kohtaan, jossa seisot. Tallennetaanko silti?")) return;
-    const sc = (lastScan && Date.now() - lastScan.t < 20000) ? lastScan : (lastScan = await E.scan({ wifi: M.wifi, ble: M.ble, cells: M.cells }));
-    const ok = E.learn(S.lat, S.lon, sc);
-    log(ok ? "Paikka opittu (" + E.counts().fingerprints + " yhteensä)" : "Liian vähän signaaleja opittavaksi (tarvitaan vähintään 3)");
-    stats();
+    if (!S.has) { toast("Aseta ensin sijainti: napauta karttaa tai paina Paikanna"); return; }
+    if (!E.available()) { toast("Oppiminen toimii vain Android-sovelluksessa"); return; }
+    if (!radioOn()) { toast("Kytke Wi-Fi, mobiiliasemat tai Bluetooth päälle"); return; }
+    const doLearn = async () => {
+      const sc = (lastScan && Date.now() - lastScan.t < 20000) ? lastScan : (lastScan = await E.scan({ wifi: M.wifi, ble: M.ble, cells: M.cells }));
+      const ok = E.learn(S.lat, S.lon, sc);
+      log(ok ? "Paikka opittu (" + E.counts().fingerprints + " yhteensä)" : "Liian vähän signaaleja opittavaksi");
+      toast(ok ? "Paikka opittu" : "Liian vähän signaaleja (tarvitaan vähintään 3)"); stats();
+    };
+    if (S.sigma > 30) openSheet({ title: "Sijainti on epätarkka", text: "Tarkkuus on vain " + fmtAcc(S.sigma) + ". Opittu paikka on yhtä väärä. Napauta ensin kartalta täsmälleen se kohta, jossa seisot.",
+      buttons: [{ label: "Opi silti", onClick: doLearn }, { label: "Peruuta" }] });
+    else doLearn();
   }
 
-  /* ---------------------------------------------------------------- step + compass sensors */
+  /* ---------------------------------------------------------------- compass + step sensors */
   function onOrientation(ev) {
     if (ev.type === "deviceorientation" && absSeen) return;
     if (ev.type === "deviceorientationabsolute") absSeen = true;
     let h = null;
     if (typeof ev.webkitCompassHeading === "number") h = ev.webkitCompassHeading;
-    else if (ev.alpha != null && ev.beta != null && ev.gamma != null && (ev.absolute || ev.type === "deviceorientationabsolute"))
-      h = E.headingFromEuler(ev.alpha, ev.beta, ev.gamma);
+    else if (ev.alpha != null && ev.beta != null && ev.gamma != null && (ev.absolute || ev.type === "deviceorientationabsolute")) h = E.headingFromEuler(ev.alpha, ev.beta, ev.gamma);
     if (h == null) return;
     hv.s = hv.n ? 0.85 * hv.s + 0.15 * Math.sin(h * RAD) : Math.sin(h * RAD);
     hv.c = hv.n ? 0.85 * hv.c + 0.15 * Math.cos(h * RAD) : Math.cos(h * RAD);
-    hv.n++;
-    heading = E.norm360(Math.atan2(hv.s, hv.c) / RAD);
+    hv.n++; heading = E.norm360(Math.atan2(hv.s, hv.c) / RAD);
   }
   function onMotion(ev) {
     const a = ev.accelerationIncludingGravity;
     if (!a || a.x == null) return;
-    if (stepper.feed(performance.now(), a.x, a.y, a.z)) {
-      const moved = tracker.step(trueHeading(), stepLen());
-      if (moved) draw(false);
-      stats();
-    }
+    if (stepper.feed(performance.now(), a.x, a.y, a.z)) { if (tracker.step(trueHeading(), stepLen())) draw(false); stats(); }
   }
-  async function askMotionPermission() {      // only iOS-style WebViews have this
+  async function askMotionPermission() {      // iOS-style WebViews only
     try {
       if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === "function") await DeviceMotionEvent.requestPermission();
       if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === "function") await DeviceOrientationEvent.requestPermission();
     } catch (e) { log("Liikeanturilupa: " + errText(e)); }
   }
-  async function setSensors(on) {
-    if (on === sensorsOn) return;
-    sensorsOn = on;
-    if (on) {
-      await askMotionPermission();
-      window.addEventListener("deviceorientationabsolute", onOrientation, true);
-      window.addEventListener("deviceorientation", onOrientation, true);
-      window.addEventListener("devicemotion", onMotion, true);
-      log("Askel- ja kompassianturit päällä");
-    } else {
-      window.removeEventListener("deviceorientationabsolute", onOrientation, true);
-      window.removeEventListener("deviceorientation", onOrientation, true);
-      window.removeEventListener("devicemotion", onMotion, true);
-      hv = { s: 0, c: 0, n: 0 }; heading = null;
-      log("Askel- ja kompassianturit pois");
-    }
+  async function setCompass(on) {
+    if (on === compassOn) return; compassOn = on;
+    if (on) { await askMotionPermission(); window.addEventListener("deviceorientationabsolute", onOrientation, true); window.addEventListener("deviceorientation", onOrientation, true); log("Kompassi päällä"); }
+    else { window.removeEventListener("deviceorientationabsolute", onOrientation, true); window.removeEventListener("deviceorientation", onOrientation, true); hv = { s: 0, c: 0, n: 0 }; heading = null; log("Kompassi pois"); }
   }
-
-  /* applies the switches to whatever is currently running */
+  function setMotion(on) {
+    if (on === motionOn) return; motionOn = on;
+    if (on) window.addEventListener("devicemotion", onMotion, true); else window.removeEventListener("devicemotion", onMotion, true);
+    log(on ? "Askelseuranta päällä" : "Askelseuranta pois");
+  }
   function applyMethods() {
-    setSensors(tracking && M.pdr);
+    setCompass(M.pdr); setMotion(tracking && M.pdr);
     if (tracking && M.gps) startGpsWatch(); else stopGpsWatch();
     stats();
   }
-
   async function startTracking() {
-    if (!M.gps && !radioOn() && !M.pdr) { log("Kaikki menetelmät ovat pois päältä"); banner("Kytke vähintään yksi paikannusmenetelmä päälle."); return; }
-    tracking = true; $("btn-track").textContent = "Lopeta seuranta";
+    if (!M.gps && !radioOn() && !M.pdr) { toast("Kytke vähintään yksi menetelmä päälle"); return; }
+    tracking = true; $("btn-track").classList.add("on"); $("btn-track-t").textContent = "Seuranta päällä";
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { /* optional */ }
-    log("Seuranta päällä");
-    applyMethods();
+    log("Seuranta päällä"); applyMethods();
     if (M.gps || radioOn()) locateNow("seuranta alkoi");
     netTimer = setInterval(() => { if (radioOn()) locateNow("ajastettu"); }, 30000);
   }
   function stopTracking() {
-    tracking = false; clearInterval(netTimer);
-    try { if (wakeLock) wakeLock.release(); } catch (e) { /* ignore */ }
-    $("btn-track").textContent = "Aloita seuranta"; log("Seuranta pysäytetty");
-    applyMethods();
+    tracking = false; clearInterval(netTimer); try { if (wakeLock) wakeLock.release(); } catch (e) { /* ignore */ }
+    $("btn-track").classList.remove("on"); $("btn-track-t").textContent = "Seuranta"; log("Seuranta pysäytetty"); applyMethods();
+  }
+
+  /* ---------------------------------------------------------------- Tekoäly tab */
+  function aiContext() {
+    const th = trueHeading();
+    return {
+      pos: S.has ? { lat: S.lat, lon: S.lon } : null, sigma: S.sigma, src: S.src, steps: S.steps, meters: S.meters, stepLen: stepLen(), heading: th,
+      scan: lastScan ? { wifi: lastScan.wifi.length, ble: lastScan.ble.length, cells: lastScan.cells.length, throttled: lastScan.throttled } : null,
+      message: E.message(), methods: M, problems: lastProblems, target: targetId,
+      waypoints: S.has ? waypoints.map(w => { const i = wpInfo(w); return { id: w.id, name: w.name, dist: i.dist, bearing: i.bearing, cardinal: i.cardinal, turn: i.turn }; }) : waypoints.map(w => ({ id: w.id, name: w.name }))
+    };
+  }
+  function addMsg(who, text, img) {
+    const el = document.createElement("div"); el.className = "msg " + who;
+    if (img) { const im = document.createElement("img"); im.src = img; el.appendChild(im); }
+    el.appendChild(document.createTextNode(text)); $("chat").appendChild(el); scrollChat(); return el;
+  }
+  const scrollChat = () => { const c = $("chat"); setTimeout(() => { c.scrollTop = c.scrollHeight; }, 30); };
+  async function askAI(text, image) {
+    if (!text && !image) return;
+    addMsg("me", text || "(kuva)", image);
+    const wait = addMsg("ai", "…");
+    const r = await window.PomaAI.ask({ text, image }, aiContext());
+    wait.textContent = r.text; scrollChat();
+  }
+  function pickImage() {
+    const f = document.createElement("input"); f.type = "file"; f.accept = "image/*";
+    f.onchange = () => { const file = f.files && f.files[0]; if (!file) return; const rd = new FileReader();
+      rd.onload = () => askAI($("ai-input").value.trim(), rd.result); $("ai-input").value = ""; rd.readAsDataURL(file); };
+    f.click();
+  }
+  function aiHeader() {
+    const i = window.PomaAI.info(); $("ai-name").textContent = i.name;
+    const m = $("ai-mode"); m.textContent = i.mode === "model" ? "Paikallinen malli" : "Ei tekoälymallia"; m.className = "chip " + (i.mode === "model" ? "ok" : "warn");
+    $("ai-mic").classList.toggle("off", i.mode !== "model"); $("ai-img").classList.toggle("off", i.mode !== "model");
   }
 
   /* ---------------------------------------------------------------- start */
   document.addEventListener("DOMContentLoaded", async () => {
-    initMap();
+    waypoints = load("poma.waypoints.v1", []);
+    initMap(); renderWaypoints();
+    const last = load("poma.last.v1", null);
+    if (last && last.lat != null) { tracker.setPosition(last.lat, last.lon, Math.max(300, last.sigma), "viimeisin tunnettu"); draw(true); }
+
+    document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
     document.querySelectorAll("input[data-m]").forEach(cb => {
       cb.checked = !!M[cb.dataset.m];
-      cb.addEventListener("change", () => {
-        M[cb.dataset.m] = cb.checked; saveMethods();
-        log(METHOD_NAMES[cb.dataset.m] + (cb.checked ? " päälle" : " pois"));
-        applyMethods();
-      });
+      cb.addEventListener("change", () => { M[cb.dataset.m] = cb.checked; save("poma.methods.v1", M); log(METHOD_NAMES[cb.dataset.m] + (cb.checked ? " päälle" : " pois")); applyMethods(); });
     });
+    ["set-height", "set-decl"].forEach(id => { const v = load("poma." + id, null); if (v != null) $(id).value = v; $(id).addEventListener("change", () => { save("poma." + id, $(id).value); stats(); }); });
     $("btn-locate").addEventListener("click", () => locateNow("käsin"));
     $("btn-track").addEventListener("click", () => (tracking ? stopTracking() : startTracking()));
+    $("btn-addwp").addEventListener("click", () => S.has ? addWaypoint(S.lat, S.lon) : toast("Aseta ensin sijainti: paina Paikanna tai napauta karttaa"));
+    $("map-addwp").addEventListener("click", () => S.has ? addWaypoint(S.lat, S.lon) : toast("Sijaintia ei vielä ole"));
+    $("map-center").addEventListener("click", () => { if (S.has && map) map.setView([S.lat, S.lon], Math.max(map.getZoom(), 16)); else toast("Sijaintia ei vielä ole"); });
     $("btn-learn").addEventListener("click", learnHere);
-    $("btn-clear").addEventListener("click", () => { trailPts = []; if (trail) trail.setLatLngs([]); S.steps = 0; S.meters = 0; stats(); });
+    $("btn-forget").addEventListener("click", () => openSheet({ title: "Unohdetaanko kaikki opitut paikat?", text: "Tätä ei voi perua.", buttons: [{ label: "Unohda kaikki", cls: "danger", onClick: () => { E.clearFingerprints(); stats(); toast("Opitut paikat poistettu"); } }, { label: "Peruuta" }] }));
     $("btn-copylog").addEventListener("click", copyLog);
+    $("banner-x").addEventListener("click", () => banner(""));
+    $("sheet").addEventListener("click", e => { if (e.target === $("sheet")) closeSheet(); });
+    $("composer").addEventListener("submit", e => { e.preventDefault(); const t = $("ai-input").value.trim(); $("ai-input").value = ""; askAI(t); });
+    $("chips").addEventListener("click", e => { const q = e.target.dataset && e.target.dataset.q; if (q) askAI(q); });
+    $("ai-img").addEventListener("click", () => window.PomaAI.info().mode === "model" ? pickImage() : toast("Kuvien ymmärtäminen vaatii paikallisen tekoälymallin (ei vielä asennettu)"));
+    $("ai-mic").addEventListener("click", () => toast(window.PomaAI.info().mode === "model" ? "Puheohjaus tulossa" : "Puheen ymmärtäminen vaatii paikallisen tekoälymallin (ei vielä asennettu)"));
+    aiHeader(); addMsg("ai", "Hei! Olen navigointiapuri. Kerron missä olet, miksi tarkkuus on mikä on ja mihin suuntaan reittipisteesi ovat. En ole vielä oikea tekoäly, mutta vastaan sovelluksen tietojen perusteella.");
+
     setInterval(stats, 1500);
-    log("Käynnistetty. Natiiviplugin: " + (E.available() ? "löytyi" : "ei (selain)") + ". Päällä: " +
-        Object.keys(M).filter(k => M[k]).map(k => METHOD_NAMES[k]).join(", "));
-    if (E.available()) {
-      try { checkStatus(await E.status()); } catch (e) { log("Tilan luku epäonnistui: " + errText(e)); }
-    } else banner("Radioskannaus toimii vain Android-sovelluksessa. Selaimessa näet vain kartan (GPS-kytkin toimii myös selaimessa).");
+    applyMethods();
+    log("Käynnistetty. Natiiviplugin: " + (E.available() ? "löytyi" : "ei (selain)") + ". Päällä: " + Object.keys(M).filter(k => M[k]).map(k => METHOD_NAMES[k]).join(", "));
+    if (E.available()) { try { checkStatus(await E.status()); } catch (e) { log("Tilan luku epäonnistui: " + errText(e)); } }
+    else banner("Radioskannaus toimii vain Android-sovelluksessa. Selaimessa näet vain kartan (GPS-kytkin toimii myös selaimessa).");
     stats();
   });
 })();

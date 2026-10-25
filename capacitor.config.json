@@ -2,5 +2,7 @@
   "appId": "fi.poma.pathfinder",
   "appName": "Poma Pathfinder",
   "webDir": "www",
-  "plugins": { "CapacitorHttp": { "enabled": true } }
+  "backgroundColor": "#080D1A",
+  "plugins": { "CapacitorHttp": { "enabled": true } },
+  "android": { "adjustMarginsForEdgeToEdge": "force" }
 }

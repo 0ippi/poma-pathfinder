@@ -27,6 +27,16 @@
     return Math.hypot(dn, de);
   }
   const norm360 = d => ((d % 360) + 360) % 360;
+  /* initial compass bearing (degrees from true north) from point a to point b */
+  function bearing(a, b) {
+    const dn = (b.lat - a.lat) * M_PER_DEG;
+    const de = (b.lon - a.lon) * M_PER_DEG * Math.cos(((a.lat + b.lat) / 2) * RAD);
+    return norm360(Math.atan2(de, dn) / RAD);
+  }
+  const CARDINALS_FI = ["POHJOINEN", "KOILLINEN", "ITÄ", "KAAKKO", "ETELÄ", "LOUNAS", "LÄNSI", "LUODE"];
+  const cardinalFi = deg => CARDINALS_FI[Math.round(norm360(deg) / 45) % 8];
+  /* signed turn angle in -180..180 needed to go from heading `from` to bearing `to` (positive = right) */
+  const turnAngle = (from, to) => ((to - from + 540) % 360) - 180;
   function circMean(angles, weights) {
     let s = 0, c = 0;
     angles.forEach((a, i) => { const w = weights ? weights[i] : 1; s += w * Math.sin(a * RAD); c += w * Math.cos(a * RAD); });
@@ -269,7 +279,7 @@
     lastStatus: () => lastStatus,
     clearFingerprints() { fingerprints = []; saveFp(); },
     // pure helpers (also used by tests)
-    moveBy, distM, circMean, norm360, headingFromEuler, createStepDetector, createTracker,
+    moveBy, distM, circMean, norm360, bearing, cardinalFi, turnAngle, headingFromEuler, createStepDetector, createTracker,
     buildRequest, signalMap, locateFingerprint
   };
 })(typeof window !== "undefined" ? window : globalThis);

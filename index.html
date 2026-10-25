@@ -2,70 +2,205 @@
 <html lang="fi">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0b1020">
-  <title>Poma Pathfinder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080D1A">
+  <title>POMA Pathfinder</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   <script src="wireless.js" defer></script>
+  <script src="ai.js" defer></script>
   <script src="script.js" defer></script>
 </head>
 <body>
-  <header class="top">
-    <h1>POMA <span>Pathfinder</span></h1>
-    <span class="ver">v11 · GPS valinnainen</span>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z" /></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z" /> <path d="M15 5.764v15" /> <path d="M9 3.236v15" /></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" /></symbol>
+<symbol id="i-sliders-horizontal" viewBox="0 0 24 24"><path d="M10 5H3" /> <path d="M12 19H3" /> <path d="M14 3v4" /> <path d="M16 17v4" /> <path d="M21 12h-9" /> <path d="M21 19h-5" /> <path d="M21 5h-7" /> <path d="M8 10v4" /> <path d="M8 12H3" /></symbol>
+<symbol id="i-locate-fixed" viewBox="0 0 24 24"><line x1="2" x2="5" y1="12" y2="12" /> <line x1="19" x2="22" y1="12" y2="12" /> <line x1="12" x2="12" y1="2" y2="5" /> <line x1="12" x2="12" y1="19" y2="22" /> <circle cx="12" cy="12" r="7" /> <circle cx="12" cy="12" r="3" /></symbol>
+<symbol id="i-footprints" viewBox="0 0 24 24"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z" /> <path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z" /> <path d="M16 17h4" /> <path d="M4 13h4" /></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3" /> <path d="M19 10v2a7 7 0 0 1-14 0v-2" /> <rect x="9" y="2" width="6" height="13" rx="3" /></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z" /> <circle cx="12" cy="13" r="3" /></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /> <path d="m21.854 2.147-10.94 10.939" /></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528" /></symbol>
+<symbol id="i-navigation-2" viewBox="0 0 24 24"><polygon points="12 2 19 21 12 17 5 21 12 2" /></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /> <path d="M12 5v14" /></symbol>
+<symbol id="i-trash-2" viewBox="0 0 24 24"><path d="M10 11v6" /> <path d="M14 11v6" /> <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /> <path d="M3 6h18" /> <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+<symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol>
+<symbol id="i-satellite" viewBox="0 0 24 24"><path d="m13.5 6.5-3.148-3.148a1.205 1.205 0 0 0-1.704 0L6.352 5.648a1.205 1.205 0 0 0 0 1.704L9.5 10.5" /> <path d="M16.5 7.5 19 5" /> <path d="m17.5 10.5 3.148 3.148a1.205 1.205 0 0 1 0 1.704l-2.296 2.296a1.205 1.205 0 0 1-1.704 0L13.5 14.5" /> <path d="M9 21a6 6 0 0 0-6-6" /> <path d="M9.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l4.296-4.296a1.205 1.205 0 0 0 0-1.704l-2.296-2.296a1.205 1.205 0 0 0-1.704 0z" /></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 20h.01" /> <path d="M2 8.82a15 15 0 0 1 20 0" /> <path d="M5 12.859a10 10 0 0 1 14 0" /> <path d="M8.5 16.429a5 5 0 0 1 7 0" /></symbol>
+<symbol id="i-radio-tower" viewBox="0 0 24 24"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9" /> <path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5" /> <circle cx="12" cy="9" r="2" /> <path d="M16.2 4.8c2 2 2.26 5.11.8 7.47" /> <path d="M19.1 1.9a9.96 9.96 0 0 1 0 14.1" /> <path d="M9.5 18h5" /> <path d="m8 22 4-11 4 11" /></symbol>
+<symbol id="i-bluetooth" viewBox="0 0 24 24"><path d="m7 7 10 10-5 5V2l5 5L7 17" /></symbol>
+<symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0" /> <circle cx="12" cy="10" r="3" /></symbol>
+<symbol id="i-crosshair" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <line x1="22" x2="18" y1="12" y2="12" /> <line x1="6" x2="2" y1="12" y2="12" /> <line x1="12" x2="12" y1="6" y2="2" /> <line x1="12" x2="12" y1="22" y2="18" /></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3" /> <path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /> <circle cx="18" cy="5" r="3" /></symbol>
+<symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 18V5" /> <path d="M15 13a4.17 4.17 0 01-3-4 4.17 4.17 0 01-3 4" /> <path d="M17.707 6.294A3 3 0 1012 5a3 3 0 10-5.707 1.294" /> <path d="M17.996 5.125a4 4 0 012.526 5.77" /> <path d="M18 18a4 4 0 002-7.465" /> <path d="M19.967 17.482a4 4 0 11-7.967.517 4 4 0 11-7.967-.517" /> <path d="M6 18a4 4 0 01-2-7.465" /> <path d="M6.004 5.125a4 4 0 00-2.526 5.77" /></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <circle cx="12" cy="12" r="6" /> <circle cx="12" cy="12" r="2" /></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol>
+</defs></svg>
+
+<div id="app">
+  <header class="head">
+    <img class="logo" src="logo.png" alt="POMA">
+    <div class="brand"><b>POMA</b><small>NAVIGOINTI ILMAN GPS:ÄÄ</small></div>
+    <span class="pill" id="pill-src"><i class="dot"></i><span id="pill-src-text">Ei sijaintia</span></span>
   </header>
 
-  <div id="map"><div id="compass"><b id="compass-arrow">↑</b><span id="compass-label">ei suuntaa</span></div></div>
+  <main id="main">
+    <div id="banner" class="banner" hidden>
+      <svg class="ic"><use href="#i-triangle-alert"/></svg>
+      <div id="banner-text"></div>
+      <button id="banner-x" class="icon-btn" aria-label="Sulje"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
 
-  <div id="banner" class="banner" hidden></div>
+    <!-- ===== NAVIGOI ===== -->
+    <section class="view active" id="view-nav">
+      <div class="card compass-card">
+        <div class="heading-line">
+          <span id="head-deg">–</span><span class="deg" id="head-degsign" hidden>°</span>
+          <span id="head-dir" class="dir">EI KOMPASSIA</span>
+        </div>
+        <div class="sub" id="head-sub">Kompassi käynnistyy, kun Askeleet ja kompassi on päällä</div>
 
-  <section class="buttons">
-    <button id="btn-locate" class="primary">Paikanna nyt</button>
-    <button id="btn-track">Aloita seuranta</button>
-    <button id="btn-learn">Opi tämä paikka</button>
-    <button id="btn-clear">Tyhjennä reitti</button>
-  </section>
-  <p class="hint" id="hint">Paina "Paikanna nyt": sovellus käyttää päälle kytkettyjä menetelmiä (kytkimet alempana). Voit myös napauttaa karttaa asettaaksesi lähtöpisteen käsin.</p>
+        <div class="dial">
+          <div class="dial-pulse"></div>
+          <div class="ring" id="ring">
+            <i class="tick"></i>
+            <span class="c n">N</span><span class="c e">E</span><span class="c s">S</span><span class="c w">W</span>
+            <div class="tmark" id="tmark" hidden><i></i></div>
+            <svg class="star" viewBox="0 0 100 100" aria-hidden="true">
+              <circle cx="50" cy="50" r="34" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="4 2" stroke-width="2"/>
+              <polygon points="50,6 58,40 42,40" fill="#EF4444"/>
+              <polygon points="50,94 57,60 43,60" fill="#64748B"/>
+              <polygon points="94,50 60,57 60,43" fill="#64748B"/>
+              <polygon points="6,50 40,57 40,43" fill="#64748B"/>
+              <path d="M50 28c-8 0-13 6-13 13 0 9 13 24 13 24s13-15 13-24c0-7-5-13-13-13z" fill="#fff"/>
+              <circle cx="50" cy="41" r="5" fill="#080D1A"/>
+            </svg>
+          </div>
+          <div class="sight"></div>
+        </div>
+        <div class="guide" id="guide">Ei kohdetta. Valitse reittipiste alta ja paina Opasta.</div>
+      </div>
 
-  <section class="card">
-    <h2>Tila</h2>
-    <dl id="stats">
-      <dt>Sijainti</dt><dd id="s-pos">–</dd>
-      <dt>Tarkkuus</dt><dd id="s-acc">–</dd>
-      <dt>Lähde</dt><dd id="s-src">–</dd>
-      <dt>Askeleet</dt><dd id="s-steps">0</dd>
-      <dt>Suunta</dt><dd id="s-head">–</dd>
-      <dt>Wi-Fi / BLE / solut</dt><dd id="s-scan">–</dd>
-      <dt>Haku</dt><dd id="s-msg">–</dd>
-      <dt>Opittuja paikkoja</dt><dd id="s-fp">0</dd>
-      <dt>Puhelin</dt><dd id="s-dev">–</dd>
-    </dl>
-  </section>
+      <div class="grid2">
+        <div class="card mini">
+          <div class="mini-h"><svg class="ic"><use href="#i-map-pin"/></svg>Sijainti</div>
+          <div class="big" id="n-pos">ei vielä</div>
+          <div class="mini-f"><span class="chip" id="n-acc">–</span><span id="n-src" class="muted">–</span></div>
+        </div>
+        <div class="card mini">
+          <div class="mini-h"><svg class="ic"><use href="#i-footprints"/></svg>Askeleet</div>
+          <div class="big"><span id="n-steps">0</span> <small>askelta</small></div>
+          <div class="mini-f"><span id="n-meters" class="muted">0 m kuljettu</span></div>
+        </div>
+      </div>
 
-  <section class="card">
-    <h2>Paikannusmenetelmät</h2>
-    <label class="sw"><span>GPS<small>Käyttää satelliitteja kun saatavilla. Oletuksena pois.</small></span><input type="checkbox" data-m="gps"></label>
-    <label class="sw"><span>Wi-Fi<small>Lähellä olevat tukiasemat</small></span><input type="checkbox" data-m="wifi"></label>
-    <label class="sw"><span>Mobiiliasemat<small>Operaattorin tukiasemat</small></span><input type="checkbox" data-m="cells"></label>
-    <label class="sw"><span>Bluetooth<small>Lähellä olevat BLE-laitteet</small></span><input type="checkbox" data-m="ble"></label>
-    <label class="sw"><span>Verkkotietokanta<small>Lähettää Wi-Fi- ja asematunnisteet BeaconDB:lle (vaatii netin)</small></span><input type="checkbox" data-m="online"></label>
-    <label class="sw"><span>Opitut paikat<small>Tunnistaa itse opetetut paikat ilman nettiä</small></span><input type="checkbox" data-m="learned"></label>
-    <label class="sw"><span>Askeleet ja kompassi<small>Siirtää sijaintia kävellessä</small></span><input type="checkbox" data-m="pdr"></label>
-  </section>
+      <div class="btn-row">
+        <button class="btn primary" id="btn-locate"><svg class="ic"><use href="#i-locate-fixed"/></svg>Paikanna</button>
+        <button class="btn" id="btn-track"><svg class="ic"><use href="#i-route"/></svg><span id="btn-track-t">Seuranta</span></button>
+      </div>
 
-  <section class="card">
-    <h2>Asetukset</h2>
-    <label>Pituus (cm) <input id="set-height" type="number" min="100" max="230" value="175"></label>
-    <label>Kompassin korjaus (°) <input id="set-decl" type="number" min="-60" max="60" step="1" value="9"></label>
-    <p class="hint">Kompassin korjaus: Suomessa magneettinen pohjoinen poikkeaa noin +9° todellisesta. Pidä puhelinta kädessä edessäsi kävellessä.</p>
-  </section>
+      <div class="sec-h"><span>Reittipisteet</span><button class="link" id="btn-addwp">+ Tallenna piste tähän</button></div>
+      <div id="wp-list" class="wp-list"></div>
+    </section>
 
-  <details class="card">
-    <summary>Loki (vianetsintä)</summary>
-    <button id="btn-copylog">Kopioi loki</button>
-    <pre id="log"></pre>
-  </details>
+    <!-- ===== KARTTA ===== -->
+    <section class="view" id="view-map">
+      <div id="map"></div>
+      <div class="map-top"><span id="map-hint">Napauta karttaa: aseta sijainti tai reittipiste</span></div>
+      <div class="map-ctl">
+        <button class="fab" id="map-center" aria-label="Keskitä"><svg class="ic"><use href="#i-locate-fixed"/></svg></button>
+        <button class="fab" id="map-addwp" aria-label="Tallenna piste"><svg class="ic"><use href="#i-flag"/></svg></button>
+      </div>
+    </section>
+
+    <!-- ===== TEKOÄLY ===== -->
+    <section class="view" id="view-ai">
+      <div class="card ai-status" id="ai-status">
+        <div class="ai-st-h"><svg class="ic"><use href="#i-sparkles"/></svg><b id="ai-name">Navigointiapuri</b><span class="chip warn" id="ai-mode">Ei tekoälymallia</span></div>
+        <p class="muted" id="ai-note">Vastaa sovelluksen tilan perusteella (sijainti, tarkkuus, reittipisteet). Paikallinen kuvia ja puhetta ymmärtävä malli on tulossa erillisenä vaiheena.</p>
+      </div>
+      <div id="chat" class="chat"></div>
+      <div class="chips" id="chips">
+        <button data-q="Missä olen?">Missä olen?</button>
+        <button data-q="Miksi tarkkuus on huono?">Miksi tarkkuus on huono?</button>
+        <button data-q="Miten parannan tarkkuutta?">Miten parannan tarkkuutta?</button>
+        <button data-q="Mihin suuntaan kohde on?">Suunta kohteeseen</button>
+        <button data-q="Mitkä menetelmät ovat päällä?">Menetelmät</button>
+      </div>
+      <form class="composer" id="composer" autocomplete="off">
+        <button type="button" class="icon-btn" id="ai-img" aria-label="Liitä kuva"><svg class="ic"><use href="#i-image"/></svg></button>
+        <button type="button" class="icon-btn" id="ai-mic" aria-label="Puhu"><svg class="ic"><use href="#i-mic"/></svg></button>
+        <input id="ai-input" type="text" placeholder="Kysy navigoinnista…" enterkeyhint="send">
+        <button type="submit" class="icon-btn send" aria-label="Lähetä"><svg class="ic"><use href="#i-send"/></svg></button>
+      </form>
+    </section>
+
+    <!-- ===== ASETUKSET ===== -->
+    <section class="view" id="view-settings">
+      <div class="sec-h"><span>Paikannusmenetelmät</span></div>
+      <div class="card list">
+        <label class="sw"><svg class="ic"><use href="#i-satellite"/></svg><span>GPS<small>Satelliitit, kun taivas näkyy. Oletuksena pois.</small></span><input type="checkbox" data-m="gps"></label>
+        <label class="sw"><svg class="ic"><use href="#i-wifi"/></svg><span>Wi-Fi<small>Lähellä olevat tukiasemat</small></span><input type="checkbox" data-m="wifi"></label>
+        <label class="sw"><svg class="ic"><use href="#i-radio-tower"/></svg><span>Mobiiliasemat<small>Operaattorin tukiasemat</small></span><input type="checkbox" data-m="cells"></label>
+        <label class="sw"><svg class="ic"><use href="#i-bluetooth"/></svg><span>Bluetooth<small>Lähellä olevat BLE-laitteet</small></span><input type="checkbox" data-m="ble"></label>
+        <label class="sw"><svg class="ic"><use href="#i-map"/></svg><span>Verkkotietokanta<small>Lähettää Wi-Fi- ja asematunnisteet BeaconDB:lle (vaatii netin)</small></span><input type="checkbox" data-m="online"></label>
+        <label class="sw"><svg class="ic"><use href="#i-brain"/></svg><span>Opitut paikat<small>Tunnistaa itse opetetut paikat ilman nettiä</small></span><input type="checkbox" data-m="learned"></label>
+        <label class="sw"><svg class="ic"><use href="#i-compass"/></svg><span>Askeleet ja kompassi<small>Siirtää sijaintia kävellessä</small></span><input type="checkbox" data-m="pdr"></label>
+      </div>
+
+      <div class="sec-h"><span>Opitut paikat</span></div>
+      <div class="card">
+        <p class="muted">Tallenna nykyinen paikka sormenjälkenä (Wi-Fi, Bluetooth, mobiiliasemat). Sen jälkeen paikka tunnistetaan ilman nettiä. Aseta ensin sijainti tarkasti karttaa napauttamalla.</p>
+        <div class="btn-row"><button class="btn" id="btn-learn"><svg class="ic"><use href="#i-target"/></svg>Opi tämä paikka</button>
+        <button class="btn danger" id="btn-forget">Unohda kaikki</button></div>
+        <div class="muted" id="fp-count">0 opittua paikkaa</div>
+      </div>
+
+      <div class="sec-h"><span>Omat arvot</span></div>
+      <div class="card list">
+        <label class="row"><span>Pituus (cm)<small>Laskee askelpituuden</small></span><input id="set-height" type="number" min="100" max="230" value="175"></label>
+        <label class="row"><span>Kompassin korjaus (°)<small>Suomessa noin +9°</small></span><input id="set-decl" type="number" min="-60" max="60" step="1" value="9"></label>
+      </div>
+
+      <div class="sec-h"><span>Tila ja loki</span></div>
+      <div class="card">
+        <dl class="kv">
+          <dt>Puhelin</dt><dd id="s-dev">–</dd>
+          <dt>Wi-Fi / BLE / solut</dt><dd id="s-scan">–</dd>
+          <dt>Viimeisin haku</dt><dd id="s-msg">–</dd>
+        </dl>
+        <details><summary>Loki (vianetsintä)</summary>
+          <button class="btn small" id="btn-copylog">Kopioi loki</button>
+          <pre id="log"></pre>
+        </details>
+      </div>
+      <p class="muted foot">POMA Pathfinder v12 · Verkkotietokanta-kytkimen ollessa päällä Wi-Fi- ja asematunnisteet lähetetään BeaconDB:lle sijainnin hakemiseksi.</p>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="nav"><svg class="ic"><use href="#i-compass"/></svg><span>Navigoi</span></button>
+    <button class="tab" data-tab="map"><svg class="ic"><use href="#i-map"/></svg><span>Kartta</span></button>
+    <button class="tab" data-tab="ai"><svg class="ic"><use href="#i-sparkles"/></svg><span>Tekoäly</span></button>
+    <button class="tab" data-tab="settings"><svg class="ic"><use href="#i-sliders-horizontal"/></svg><span>Asetukset</span></button>
+  </nav>
+</div>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-h" id="sheet-title"></div>
+    <div class="muted" id="sheet-text"></div>
+    <input id="sheet-input" type="text" hidden>
+    <div class="sheet-btns" id="sheet-btns"></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
 </body>
 </html>
