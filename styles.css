@@ -158,3 +158,11 @@ pre { white-space:pre-wrap; word-break:break-word; font-size:11px; max-height:28
 .pill{max-width:58%}
 .toast{bottom:auto;top:calc(70px + env(safe-area-inset-top));transform:translate(-50%,-12px)}
 .toast.show{transform:translate(-50%,0)}
+
+.sos{display:flex;align-items:center;gap:12px;padding:13px 16px;margin-bottom:12px;border-radius:16px;background:#B91C1C;color:#fff;text-decoration:none;border:1px solid #F87171;box-shadow:0 4px 18px rgba(185,28,28,.35)}
+.sos:active{background:#991B1B}
+.sos .ic{width:26px;height:26px;flex:none}
+.sos span{display:flex;flex-direction:column;min-width:0}
+.sos b{font-size:16px;letter-spacing:.04em}
+.sos small{font-size:12px;opacity:.9}
+.sos small{color:#fff;opacity:.95;margin-top:2px}

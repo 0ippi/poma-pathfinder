@@ -180,6 +180,7 @@
     } else if (t) g.textContent = t.name + ": odotetaan sijaintia";
     else g.textContent = "Ei kohdetta. Valitse reittipiste alta ja paina Opasta.";
     // cards
+    $("sos-pos").textContent = S.has ? "Kerro sijaintisi: " + S.lat.toFixed(5) + ", " + S.lon.toFixed(5) + " (" + fmtAcc(S.sigma) + ")" : "Avaa puhelimen soittonäppäimistön numerolla 112";
     $("n-pos").textContent = S.has ? S.lat.toFixed(5) + ", " + S.lon.toFixed(5) : "ei vielä";
     $("n-acc").textContent = S.has ? fmtAcc(S.sigma) : "–"; $("n-src").textContent = S.src || "Paina Paikanna";
     $("n-steps").textContent = S.steps; $("n-meters").textContent = Math.round(S.meters) + " m kuljettu";
